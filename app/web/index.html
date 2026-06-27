@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>autoRainbow</title>
+  <link rel="icon" type="image/png" href="./assets/icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800;900&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css" />
+  <style>
+    #guidePage {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: linear-gradient(135deg, #f8f8f0 0%, #fff3cf 100%);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      z-index: 9999; font-family: "Nunito", "Noto Sans SC", "PingFang SC", sans-serif;
+      transition: opacity 0.5s ease, visibility 0.5s ease;
+    }
+    #guidePage.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+    #guidePage h1 { font-size: 2.2em; color: #794f27; margin-bottom: 0.3em; font-weight: 700; }
+    #guidePage p { font-size: 1.1em; color: #9f927d; margin-bottom: 1.5em; max-width: 500px; text-align: center; line-height: 1.6; font-weight: 500; }
+    .guide-buttons { display: flex; gap: 16px; margin-bottom: 24px; }
+    .guide-buttons button {
+      padding: 14px 32px; border: none; border-radius: 50px;
+      font-size: 1.1em; cursor: pointer; font-family: inherit;
+      transition: all 0.25s cubic-bezier(0.4,0,0.2,1);
+      font-weight: 600; background: rgb(247,243,223); color: #725d42;
+      box-shadow: 0 2px 4px 0 rgba(61,52,40,0.06);
+      line-height: 1;
+    }
+    .guide-buttons button:hover { transform: translateY(-1px); box-shadow: 0 3px 10px 0 rgba(61,52,40,0.10); border-color: #ffce65; color: #725d42; }
+    .guide-buttons button.primary { background: #ffce65; color: #725d42; box-shadow: 0 5px 0 0 #c7a24f; }
+    .guide-buttons button.primary:hover { background: #ffdc8a; transform: translateY(-1px); box-shadow: 0 6px 0 0 #c7a24f; color: #725d42; }
+    .guide-steps { background: rgb(247,243,223); border-radius: 20px; padding: 24px 32px; max-width: 520px; border: 2px solid #9f927d; }
+    .guide-steps ol { margin: 0; padding-left: 20px; }
+    .guide-steps li { margin-bottom: 10px; color: #725d42; font-size: 0.95em; line-height: 1.5; font-weight: 500; }
+    .guide-steps code { background: rgba(255,206,101,0.18); padding: 2px 8px; border-radius: 4px; font-size: 0.9em; color: #9a6b15; }
+    #guideStatus { margin-top: 20px; color: #9f927d; font-size: 0.9em; font-weight: 500; }
+    .guide-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #c4b89e; border-top-color: #ffce65; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="guidePage">
+    <h1>🦋 autoRainbow</h1>
+    <p>请在本地安装并运行 Agent 服务，以连接 InDesign 排版引擎。</p>
+    <div class="guide-buttons">
+      <button id="dlMacBtn" class="primary">下载 macOS 版</button>
+      <button id="dlWinBtn">下载 Windows 版</button>
+    </div>
+    <div class="guide-steps">
+      <ol>
+        <li>下载对应系统的 Agent 可执行文件</li>
+        <li>双击运行（或终端执行）启动 Agent 服务</li>
+        <li>页面将自动检测并连接到 <code>localhost:8800</code></li>
+      </ol>
+    </div>
+    <div id="guideStatus"><span class="guide-spinner"></span>正在检测本地 Agent...</div>
+  </div>
+
+  <div class="app">
+    <header class="header">
+      <p id="statusText"></p>
+      <div id="statusBadge" class="status-badge">
+        <span id="stateDot" class="dot" style="width:10px;height:10px;"></span>
+        <span id="stateText" style="font-weight:600;"></span>
+        <span id="lastUpdate" style="color:#9f927d;border-left:1px solid #c4b89e;padding-left:8px;font-size:13px;"></span>
+      </div>
+      <div class="config-v2-statusbar config-v2-header-statusbar" aria-label="工作状态">
+        <div class="config-v2-statusbar-title">
+          <span>工作状态</span>
+          <strong>AutoRainbow</strong>
+        </div>
+        <div class="config-v2-statusbar-item">
+          <span>监听器</span>
+          <strong id="configV2WatcherStatus">检测中</strong>
+          <em id="configV2WatcherHint">-</em>
+        </div>
+        <div class="config-v2-statusbar-item">
+          <span>队列</span>
+          <strong id="configV2QueueStatus">空闲</strong>
+          <em id="configV2QueueHint">等待任务</em>
+        </div>
+      </div>
+    </header>
+
+    <nav class="top-nav">
+      <button class="tab-btn active" data-tab="config2">配置</button>
+      <button class="tab-btn" data-tab="result">结果</button>
+      <button class="tab-btn" data-tab="logs">日志</button>
+      <button class="tab-btn" data-tab="watcher">监听器</button>
+      <button class="tab-btn" data-tab="env">设置</button>
+      <button class="tab-btn" data-tab="cleanup">清理</button>
+      <button class="tab-btn" data-tab="templates">板块</button>
+      <button class="tab-btn" data-tab="snapshot">快照测试</button>
+      <button class="tab-btn" data-tab="components">组件</button>
+    </nav>
+
+    <div class="divider-animal wave-yellow app-divider" aria-hidden="true"></div>
+
+    <main class="tab-body">
+      <section id="tab-config" class="tab-pane">
+        <div id="dropZone" class="drop-zone">
+          <div class="drop-title">点击下方按钮选择文件</div>
+          <div class="drop-sub" id="dropHint">支持：docx / png / jpg / jpeg</div>
+          <div class="drop-actions">
+            <button id="pickBtn">手动选择文件</button>
+          </div>
+        </div>
+        <div class="workflow-overview" aria-label="工作流状态">
+          <div class="workflow-tile">
+            <span class="workflow-label">监听器</span>
+            <strong id="configWatcherStatus">检测中</strong>
+            <span id="configWatcherHint">-</span>
+          </div>
+          <div class="workflow-tile">
+            <span class="workflow-label">队列</span>
+            <strong id="configQueueStatus">空闲</strong>
+            <span id="configQueueHint">等待任务</span>
+          </div>
+          <div class="workflow-tile">
+            <span class="workflow-label">本次结果</span>
+            <strong id="configResultStatus">0 / 0</strong>
+            <span id="configResultHint">成功 / 失败</span>
+          </div>
+          <button id="configOpenOutputBtn" class="workflow-tile workflow-action" type="button">
+            <span class="workflow-label">输出</span>
+            <strong>查看生成目录</strong>
+            <span>打开 B_outputs</span>
+          </button>
+        </div>
+        <input id="filePicker" type="file" multiple accept=".docx,.png,.jpg,.jpeg" hidden />
+        <div class="table-wrap">
+          <div class="files-list">
+            <div class="files-head">
+              <div class="col-handle"></div>
+              <div class="col-name">文件名</div>
+              <div class="col-template">使用模板</div>
+              <div class="col-status">生成情况</div>
+              <div class="col-action">操作</div>
+            </div>
+            <div id="filesBody" class="files-body"></div>
+          </div>
+        </div>
+        <div class="tab-actions">
+          <div class="actions">
+            <button id="refreshBtn" class="ghost"><span class="btn-label">刷新状态</span></button>
+            <button id="cacheDirBtn" class="ghost"><span class="btn-label">缓存目录</span></button>
+            <button id="clearInputBtn" class="ghost"><span class="btn-label">清空输入</span></button>
+            <button id="clearDoneBtn" class="ghost"><span class="btn-label">清空已完成</span></button>
+            <button id="startBtn" class="primary"><span class="btn-label">开始处理</span></button>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-config2" class="tab-pane active">
+        <div class="config-v2-shell">
+          <aside class="config-v2-rail config-v2-files">
+            <div class="config-v2-panel-title">
+              <span>待处理队列</span>
+            </div>
+            <div id="configV2FilesBody" class="config-v2-file-list"></div>
+          </aside>
+
+          <section class="config-v2-editor">
+            <div class="config-v2-editor-head">
+              <div class="config-v2-editor-title-block">
+                <span class="config-v2-kicker">文件编辑</span>
+                <div class="config-v2-title-row">
+                  <h2 id="configV2EditorTitle">选择一个文件开始编辑</h2>
+                  <div class="config-v2-title-side">
+                    <div id="configV2TemplateDropdown" class="template-dropdown">
+                      <button id="configV2TplTrigger" class="tpl-trigger" type="button">
+                        <span id="configV2TplDot" class="dot config-v2-tpl-dot" aria-hidden="true"></span>
+                        <span class="config-v2-tpl-label">未选择</span>
+                      </button>
+                      <div class="tpl-menu" role="listbox"></div>
+                    </div>
+                    <span id="configV2EditorMeta" class="config-v2-editor-status">未打开</span>
+                  </div>
+                </div>
+              </div>
+              <div class="config-v2-editor-actions">
+                <button id="configV2ReparseBtn" class="ghost small" type="button">重新解析</button>
+                <button id="configV2ResetBreaksBtn" class="ghost small" type="button">重置分页</button>
+                <button id="configV2SaveBtn" class="primary small" type="button">保存</button>
+              </div>
+            </div>
+            <div id="configV2EditorBody" class="config-v2-editor-body">
+              <div class="config-v2-empty">
+                <strong>还没有打开文件</strong>
+                <span>从左侧选择文件，或把 docx / 图片拖到页面任意位置。</span>
+              </div>
+            </div>
+            <div class="config-v2-zoom-controls" aria-label="编辑缩放">
+              <button id="configV2ZoomOutBtn" class="ghost small" type="button" title="缩小">-</button>
+              <span id="configV2ZoomValue">100%</span>
+              <button id="configV2ZoomInBtn" class="ghost small" type="button" title="放大">+</button>
+              <button id="configV2ZoomResetBtn" class="ghost small" type="button" title="恢复到100%" aria-label="恢复到100%">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3 12a9 9 0 1 0 3-6.7"></path>
+                  <path d="M3 4v6h6"></path>
+                </svg>
+              </button>
+            </div>
+          </section>
+
+          <aside class="config-v2-rail config-v2-output">
+            <div class="config-v2-panel-title">
+              <span>输出文件队列</span>
+              <strong id="configV2OutputCount">0 个文件</strong>
+            </div>
+            <div class="config-v2-action-grid single">
+              <button id="configV2StartBtn" type="button">开始处理</button>
+            </div>
+            <div id="configV2OutputBody" class="config-v2-file-list config-v2-output-list"></div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="tab-result" class="tab-pane">
+        <div class="result-grid">
+          <div class="card">
+            <h3>处理统计</h3>
+            <div id="resultSummary"></div>
+          </div>
+          <div class="card">
+            <h3>出错文件</h3>
+            <ul id="resultErrors"></ul>
+          </div>
+        </div>
+        <div class="tab-actions">
+          <div class="actions">
+            <button id="openGeneratedBtn"><span class="btn-label">查看生成目录</span></button>
+            <button id="exportAllBtn" class="ghost"><span class="btn-label">全部导出</span></button>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-logs" class="tab-pane">
+        <div class="logs">
+          <div class="log-card">
+            <h3>dispatch.log</h3>
+            <button class="clear-log-btn" data-log-kind="dispatch">清除本栏日志</button>
+            <pre id="dispatchLog"></pre>
+          </div>
+          <div class="log-card">
+            <h3>watcher.log</h3>
+            <button class="clear-log-btn" data-log-kind="watcher">清除本栏日志</button>
+            <pre id="watcherLog"></pre>
+          </div>
+          <div class="log-card">
+            <h3>pipeline.log</h3>
+            <button class="clear-log-btn" data-log-kind="pipeline">清除本栏日志</button>
+            <pre id="pipelineLog"></pre>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-watch" class="tab-pane">
+        <div class="card">
+          <h3>监听器状态</h3>
+          <div class="watcher-status-grid">
+            <div class="status-item">
+              <span class="status-label">安装状态</span>
+              <span id="watcherInstallStatus" class="status-value">检测中...</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">运行状态</span>
+              <span id="watcherAliveStatus" class="status-value">检测中...</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">安装路径</span>
+              <span id="watcherPath" class="status-value mono">-</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">引擎名称</span>
+              <span class="status-value mono">autoRainbowWatcherEngine</span>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>项目路径配置</h3>
+          <div class="status-item" style="margin-bottom:12px;">
+            <span class="status-label">当前项目根目录</span>
+            <span id="configProjectRoot" class="status-value mono">-</span>
+          </div>
+          <div class="status-item" style="margin-bottom:12px;">
+            <span class="status-label">配置文件</span>
+            <span id="configFilePath" class="status-value mono">-</span>
+          </div>
+          <div class="tool-row">
+            <input id="projectRootInput" type="text" placeholder="输入项目根目录绝对路径" style="min-width:380px;" />
+            <button id="setProjectRootBtn" class="primary">设置</button>
+          </div>
+          <div id="projectRootStatus" class="mono" style="margin-top:12px;white-space:pre-wrap;"></div>
+        </div>
+        <div class="card">
+          <h3>InDesign 应用配置</h3>
+          <div class="status-item" style="margin-bottom:12px;">
+            <span class="status-label">当前 InDesign 路径</span>
+            <span id="configIndesignPath" class="status-value mono">-</span>
+          </div>
+          <div class="tool-row">
+            <input id="indesignAppPathInput" type="text" placeholder="输入 InDesign 应用绝对路径" style="min-width:380px;" />
+            <button id="setIndesignAppPathBtn" class="primary">设置</button>
+          </div>
+          <div id="indesignAppPathStatus" class="mono" style="margin-top:12px;white-space:pre-wrap;"></div>
+        </div>
+        <div class="card">
+          <h3>操作</h3>
+          <div class="tool-row">
+            <button id="installWatcherBtn" class="primary">安装监听器</button>
+            <button id="updateWatcherBtn">更新监听器</button>
+            <button id="uninstallWatcherBtn" class="ghost">卸载监听器</button>
+          </div>
+          <div class="tool-row" style="margin-top:12px;">
+            <button id="checkWatcherBtn">刷新状态</button>
+            <button id="openStartupDirBtn">打开启动脚本目录</button>
+          </div>
+          <div id="watcherActionStatus" class="mono" style="margin-top:12px;white-space:pre-wrap;"></div>
+        </div>
+        <div class="card">
+          <h3>说明</h3>
+          <div class="watcher-help-text">
+            <p>监听器是 InDesign 的启动脚本，负责监听任务队列并自动执行排版。</p>
+            <ul>
+              <li><strong>安装</strong>：将监听器脚本复制到 InDesign 的启动脚本目录</li>
+              <li><strong>更新</strong>：重新复制最新的监听器脚本（需重启 InDesign 生效）</li>
+              <li><strong>卸载</strong>：从启动脚本目录删除监听器脚本</li>
+              <li><strong>运行状态</strong>：通过心跳文件检测监听器是否正常工作（10秒超时）</li>
+            </ul>
+            <p class="text-warn">注意：安装或更新后必须重启 InDesign 才能生效。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-snapshot" class="tab-pane">
+        <div class="card">
+          <h3>快照导出</h3>
+          <p>扫描 B_outputs 下所有 .indd，导出每页为图片 + 结构 JSON</p>
+          <div class="tool-row">
+            <button id="snapExportBtn" class="primary">导出快照</button>
+          </div>
+          <div id="snapExportStatus" class="mono" style="margin-top:8px;white-space:pre-wrap;"></div>
+        </div>
+        <div class="card">
+          <h3>金标对比</h3>
+          <p>将当前快照与 _golden 金标对比，差异像素标红并显示结构 diff</p>
+          <div class="tool-row">
+            <button id="snapCompareBtn">对比金标</button>
+            <button id="snapPromoteBtn">更新金标</button>
+            <button id="snapOpenOutputBtn">打开输出目录</button>
+          </div>
+          <div id="snapCompareResult" class="mono snap-result" style="white-space:pre-wrap;"></div>
+        </div>
+        <div class="card">
+          <h3>金标目录</h3>
+          <p>已保存的金标基线目录（_golden）：</p>
+          <div id="snapGoldenList" class="mono" style="white-space:pre-wrap;font-size:12px;"></div>
+        </div>
+        <div class="tab-actions">
+          <div class="actions">
+            <button id="snapRefreshBtn" class="ghost">刷新状态</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-env" class="tab-pane">
+        <div class="card">
+          <h3>模板目录</h3>
+          <div class="tool-row">
+            <input id="templateDirInput" type="text" placeholder="输入模板目录绝对路径" style="min-width:420px;" />
+            <button id="saveTemplateDirBtn">保存模板目录</button>
+            <button id="openTemplateBtn">打开模板目录</button>
+          </div>
+          <div id="templateDirStatus" class="mono"></div>
+        </div>
+      </section>
+
+      <section id="tab-cleanup" class="tab-pane">
+        <div class="card">
+          <h3>清理检查</h3>
+          <div class="tool-row">
+            <button id="cleanupCheckBtn">运行清理检查</button>
+          </div>
+          <div id="cleanupResult" class="mono"></div>
+        </div>
+        <div class="card">
+          <h3>缓存与输出管理</h3>
+          <div id="cacheStatsDisplay" class="mono" style="margin-bottom:8px;font-size:12px;white-space:pre-wrap;"></div>
+          <div class="tool-row">
+            <button id="refreshCacheBtn" class="ghost">刷新统计</button>
+            <button id="clearCacheBtn">清理非核心缓存</button>
+          </div>
+          <div id="clearCacheResult" class="mono"></div>
+        </div>
+      </section>
+
+      <section id="tab-templates" class="tab-pane">
+        <div class="card">
+          <h3>板块配置</h3>
+          <p>各板块的模板参数，修改后保存到统一配置文件</p>
+          <div id="templateConfigList" class="mono" style="font-size:12px;"></div>
+        </div>
+      </section>
+      <section id="tab-components" class="tab-pane">
+        <div id="componentsShowcase"></div>
+      </section>
+    </main>
+  </div>
+  <nav id="phoneNav" class="phone-nav" aria-label="页面导航">
+    <div class="phone-shell">
+      <div class="phone-status">
+        <span id="phoneClock">00:00</span>
+        <span class="phone-signal" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </span>
+      </div>
+      <div class="phone-title">
+        <span>AUTO RAINBOW</span>
+        <strong>菜单</strong>
+      </div>
+      <div class="phone-apps" role="list">
+        <button class="phone-app active" data-tab="config2" type="button" aria-current="page">
+          <span class="phone-app-icon"><img src="./assets/img/phone/config.svg" alt="" /></span>
+          <span class="phone-app-label">配置</span>
+        </button>
+        <button class="phone-app" data-tab="result" type="button">
+          <span class="phone-app-icon"><img src="./assets/img/phone/result.svg" alt="" /></span>
+          <span class="phone-app-label">结果</span>
+        </button>
+        <button class="phone-app" data-tab="logs" type="button">
+          <span class="phone-app-icon"><img src="./assets/img/phone/logs.svg" alt="" /></span>
+          <span class="phone-app-label">日志</span>
+        </button>
+        <button class="phone-app" data-tab="watcher" type="button">
+          <span class="phone-app-icon"><img src="./assets/img/phone/watcher.svg" alt="" /></span>
+          <span class="phone-app-label">监听器</span>
+        </button>
+        <button class="phone-app" data-tab="env" type="button">
+          <span class="phone-app-icon"><img src="./assets/img/phone/env.svg" alt="" /></span>
+          <span class="phone-app-label">设置</span>
+        </button>
+        <button class="phone-app" data-tab="cleanup" type="button">
+          <span class="phone-app-icon"><img src="./assets/img/phone/cleanup.svg" alt="" /></span>
+          <span class="phone-app-label">清理</span>
+        </button>
+        <button class="phone-app" data-tab="templates" type="button">
+          <span class="phone-app-icon"><img src="./assets/img/phone/templates.svg" alt="" /></span>
+          <span class="phone-app-label">板块</span>
+        </button>
+        <button class="phone-app" data-tab="snapshot" type="button">
+          <span class="phone-app-icon"><img src="./assets/img/phone/snapshot.svg" alt="" /></span>
+          <span class="phone-app-label">快照</span>
+        </button>
+        <button class="phone-app" data-tab="components" type="button">
+          <span class="phone-app-icon"><img src="./assets/img/phone/components.svg" alt="" /></span>
+          <span class="phone-app-label">组件</span>
+        </button>
+      </div>
+      <div class="phone-home-indicator" aria-hidden="true"></div>
+    </div>
+  </nav>
+  <div id="formatToast" class="format-toast hidden"></div>
+  <div id="globalDropOverlay" class="global-drop-overlay hidden">
+    <div class="global-drop-panel">
+      <strong>松开添加文件</strong>
+      <span>支持 docx / png / jpg / jpeg</span>
+    </div>
+  </div>
+  <div id="customScrollbar" class="custom-scrollbar hidden" aria-hidden="true">
+    <div id="customScrollbarThumb" class="custom-scrollbar-thumb"></div>
+  </div>
+
+  <div id="editorOverlay" class="editor-overlay hidden">
+    <div class="editor-modal">
+      <div class="editor-header">
+        <strong id="editorTitle">编辑元素顺序</strong>
+        <div class="editor-header-actions">
+          <button id="editorAddLineBtn" class="ghost small" title="添加空行">+ 空行</button>
+          <div id="editorTemplateDropdown" class="template-dropdown" style="position:relative">
+            <button id="editorTplTrigger" class="tpl-trigger">未选择</button>
+            <div class="tpl-menu" role="listbox"></div>
+          </div>
+          <button id="editorCloseBtn" class="ghost small">✕</button>
+        </div>
+      </div>
+      <div id="editorBody" class="editor-body"></div>
+      <div class="editor-footer">
+        <button id="editorCancelBtn" class="ghost">取消</button>
+        <button id="editorSaveBtn" class="primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

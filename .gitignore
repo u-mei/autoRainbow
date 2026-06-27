@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build output (very large)
+src-tauri/target/
+app/tauri_console/dist/
+build/
+
+# Runtime data
+workspace/.ui_state.json
+workspace/indesign_layout.log
+workspace/B_outputs/
+workspace/C_inputs/
+workspace/**/logs/
+workspace/**/*.log
+workspace/**/*.tmp
+workspace/**/*.cache
+workspace/**/queue/
+workspace/A_templates/**/.FillReplaceHolder.jpg
+workspace/A_templates/**/*_objects.json
+
+# InDesign files (too large for git)
+*.indd
+
+# OS files
+.DS_Store
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Config (user-specific)
+autorainbow_config.json
+.claude/
+*.local.json
+
+# Local/private template reference files
+模板/
