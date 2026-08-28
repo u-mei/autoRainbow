@@ -5,7 +5,7 @@ AutoRainbow Agent - HTTP 服务入口
 """
 
 import os, sys, json, threading, time, mimetypes
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -14,7 +14,15 @@ _package_dir = _script_dir.parent
 if str(_package_dir) not in sys.path:
     sys.path.insert(0, str(_package_dir))
 
-from agent.routes import dispatch, json_response, add_cors_headers, set_shutdown_callback
+from agent.routes import dispatch, json_response, add_cors_headers, set_shutdown_callback, start_queue_recovery_worker
+
+# 2026-08-18：启动时校正统一路径索引——project_root 以脚本位置反推为准，
+# 目录迁移后首次启动即把 paths.json 落盘为新项目根（不依赖旧值）。
+try:
+    from agent import config as _cfg_mod
+    _cfg_mod.write_paths()
+except Exception:
+    pass
 
 _proj_root = _script_dir.parent.parent.parent
 _static_dir = _proj_root / "app" / "web"
@@ -22,7 +30,7 @@ _static_dir = _proj_root / "app" / "web"
 
 class AgentHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
-        pass
+        sys.stderr.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {self.command} {self.path} -> {format % args}\n")
 
     def handle(self):
         try:
@@ -65,8 +73,12 @@ class AgentHandler(BaseHTTPRequestHandler):
         self._route()
 
     def _route(self):
-        if not dispatch(self):
-            json_response(self, {"error": "Not Found", "path": self.path}, 404)
+        start = time.time()
+        try:
+            if not dispatch(self):
+                json_response(self, {"error": "Not Found", "path": self.path}, 404)
+        finally:
+            sys.stderr.write(f"[{time.strftime('%H:%M:%S')}] {self.command} {self.path} 完成耗时 {time.time() - start:.2f}s\n")
 
     def _serve_static(self, send_body=True):
         path = urlparse(self.path).path.lstrip("/")
@@ -91,6 +103,7 @@ class AgentHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(resolved.stat().st_size))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         if send_body:
             with open(resolved, "rb") as f:
@@ -99,10 +112,23 @@ class AgentHandler(BaseHTTPRequestHandler):
 
 _server_instance = None
 
+
+class AgentServer(ThreadingHTTPServer):
+    """多线程 HTTP 服务器：慢请求（文件选择框、大文件、子进程调用）
+    只占用自己的线程，不阻塞前端轮询/健康检查。"""
+    daemon_threads = True
+    block_on_close = False
+
+
 def serve_forever(host="127.0.0.1", port=8800):
     global _server_instance
-    _server_instance = HTTPServer((host, port), AgentHandler)
+    _server_instance = AgentServer((host, port), AgentHandler)
     set_shutdown_callback(_server_instance.shutdown)
+    # 后台线程：定时扫描并自动恢复卡死的 running 任务
+    try:
+        start_queue_recovery_worker()
+    except Exception:
+        pass
     print(f"[autoRainbow Agent] 服务启动: http://{host}:{port}", flush=True)
     try:
         _server_instance.serve_forever()

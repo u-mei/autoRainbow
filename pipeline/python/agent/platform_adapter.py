@@ -1,4 +1,4 @@
-import os, sys, subprocess, shutil, glob, json
+import os, sys, subprocess, shutil, glob, json, re
 from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import Optional, List
@@ -33,6 +33,11 @@ class PlatformAdapter(ABC):
     def find_indesign_app(self) -> Optional[str]:
         pass
 
+    @abstractmethod
+    def trash_file(self, path: str) -> None:
+        """把文件移动到系统回收站/废纸篓；失败时抛出异常。"""
+        pass
+
 
 class MacOSAdapter(PlatformAdapter):
     def open_app(self, app_path: str) -> None:
@@ -64,6 +69,8 @@ class MacOSAdapter(PlatformAdapter):
         subprocess.run(["open", path], capture_output=True)
 
     def execute_jsx(self, script_path: str, app_name: str) -> str:
+        if not re.match(r"^[\w\u4e00-\u9fff .()\-']+$", app_name):
+            raise ValueError(f"非法的 InDesign 应用名: {app_name}")
         cmd = [
             "osascript",
             "-e", f'set f to POSIX file "{script_path}"',
@@ -96,10 +103,19 @@ class MacOSAdapter(PlatformAdapter):
         matches = glob.glob("/Applications/Adobe InDesign*/Adobe InDesign*.app")
         return matches[0] if matches else None
 
+    def trash_file(self, path: str) -> None:
+        escaped = str(path).replace('"', '\\"')
+        result = subprocess.run(
+            ["osascript", "-e", f'tell application "Finder" to delete POSIX file "{escaped}"'],
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"移到废纸篓失败: {result.stderr.strip()}")
+
 
 class WindowsAdapter(PlatformAdapter):
     def open_app(self, app_path: str) -> None:
-        subprocess.run(["start", "", app_path], shell=True, capture_output=True)
+        os.startfile(app_path)
 
     def pick_files(self, prompt: str, extensions: list) -> List[str]:
         import tkinter as tk
@@ -146,6 +162,19 @@ class WindowsAdapter(PlatformAdapter):
     def find_indesign_app(self) -> Optional[str]:
         matches = glob.glob("C:\\Program Files\\Adobe\\Adobe InDesign*\\InDesign.exe")
         return matches[0] if matches else None
+
+    def trash_file(self, path: str) -> None:
+        escaped = str(path).replace("'", "''")
+        cmd = (
+            "Add-Type -AssemblyName Microsoft.VisualBasic; "
+            f"[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('{escaped}', 'OnlyErrorDialogs', 'SendToRecycleBin')"
+        )
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", cmd],
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"移到回收站失败: {result.stderr.strip()}")
 
 
 def create_adapter() -> PlatformAdapter:

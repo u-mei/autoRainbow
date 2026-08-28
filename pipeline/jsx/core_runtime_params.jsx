@@ -1,10 +1,18 @@
 (function () {
-    $.global.__AUTORAINBOW_CORE__ = $.global.__AUTORAINBOW_CORE__ || {};
-
-    function safeParseJSON(text) {
-        try { if (typeof JSON !== "undefined" && JSON.parse) { return JSON.parse(text); } } catch (e) {}
-        try { return parseES3Json(text); } catch (e2) { return {}; }
+    var root = $.global.__AUTORAINBOW_CORE__ || ($.global.__AUTORAINBOW_CORE__ = {});
+    if (root.runtimeParams) {
+        return;
     }
+
+    var api = {};
+
+    api.parseJsonText = function (text) {
+        if (typeof JSON !== "undefined" && JSON.parse) {
+            return JSON.parse(text);
+        }
+        return parseES3Json(text);
+    };
+
     function parseES3Json(text) {
         if (typeof JSON !== "undefined" && JSON.parse) {
             return JSON.parse(text);
@@ -191,65 +199,118 @@
         }
         return result;
     }
-    function safeStringifyJSON(obj) {
-        if (typeof JSON !== "undefined" && JSON.stringify) { return JSON.stringify(obj, null, 2); }
-        var k, v, parts = [];
-        for (k in obj) { if (obj.hasOwnProperty(k)) { v = obj[k]; parts.push('  "' + k + '": ' + (typeof v === "string" ? '"' + String(v).replace(/"/g, '\\"') + '"' : String(v))); } }
-        return "{\n" + parts.join(",\n") + "\n}";
-    }
 
-    var scriptFile = File($.fileName);
-    var engineFile = File(scriptFile.parent.fsName + "/create_layout_templateA.jsx");
 
-    if (!engineFile.exists) {
-        alert("未找到模板引擎脚本: " + engineFile.fsName);
-        return;
-    }
-
-    // 读取现有参数文件，添加 force_layout_mode
-    var paramsFile = File(scriptFile.parent.fsName + "/_pipeline_params.json");
-    var params = {};
-    if (paramsFile.exists) {
+    api.stringifyJsonText = function (obj, pretty) {
         try {
-            if (paramsFile.open("r")) {
+            if (typeof JSON !== "undefined" && JSON.stringify) {
+                return pretty ? JSON.stringify(obj, null, 2) : JSON.stringify(obj);
+            }
+        } catch (e) {
+        }
+
+        function quoteString(value) {
+            return "\"" + String(value)
+                .replace(/\\/g, "\\\\")
+                .replace(/"/g, "\\\"")
+                .replace(/\r/g, "\\r")
+                .replace(/\n/g, "\\n")
+                .replace(/\t/g, "\\t") + "\"";
+        }
+
+        function encode(value, level) {
+            var i;
+            var k;
+            var keys;
+            var parts;
+            var indent;
+            var childIndent;
+            if (value === null || value === undefined) {
+                return "null";
+            }
+            if (typeof value === "string") {
+                return quoteString(value);
+            }
+            if (typeof value === "number" || typeof value === "boolean") {
+                return String(value);
+            }
+            if (value instanceof Array) {
+                parts = [];
+                for (i = 0; i < value.length; i += 1) {
+                    parts.push(encode(value[i], level + 1));
+                }
+                if (!pretty) {
+                    return "[" + parts.join(",") + "]";
+                }
+                indent = new Array(level + 1).join("  ");
+                childIndent = new Array(level + 2).join("  ");
+                return parts.length ? "[\n" + childIndent + parts.join(",\n" + childIndent) + "\n" + indent + "]" : "[]";
+            }
+            if (typeof value === "object") {
+                parts = [];
+                keys = [];
+                for (k in value) {
+                    if (value.hasOwnProperty(k)) {
+                        keys.push(k);
+                    }
+                }
+                for (i = 0; i < keys.length; i += 1) {
+                    k = keys[i];
+                    parts.push(quoteString(k) + (pretty ? ": " : ":") + encode(value[k], level + 1));
+                }
+                if (!pretty) {
+                    return "{" + parts.join(",") + "}";
+                }
+                indent = new Array(level + 1).join("  ");
+                childIndent = new Array(level + 2).join("  ");
+                return parts.length ? "{\n" + childIndent + parts.join(",\n" + childIndent) + "\n" + indent + "}" : "{}";
+            }
+            return quoteString(String(value));
+        }
+
+        return encode(obj, 0);
+    };
+
+    api.loadPipelineParams = function (scriptFilePath) {
+        // 2026-08-24 修复：不缓存。core_runtime_params 带"已初始化跳过"保护，
+        // 同一 InDesign 会话内连续处理多任务时（如处理全部），缓存会残留上一个任务的参数
+        // （input_json/template_id），导致后续任务（如 templateD）读到错误参数而失败
+        // （新页面中未找到正文文本原型框 label: proto_text）或静默排错内容。
+        try {
+            var scriptFile = File(scriptFilePath || $.fileName);
+            var scriptFolder = scriptFile.parent;
+            var paramsFile = File(scriptFolder.fsName + "/_pipeline_params.json");
+            if (paramsFile.exists && paramsFile.open("r")) {
                 paramsFile.encoding = "UTF-8";
                 var text = paramsFile.read();
                 paramsFile.close();
                 if (text.charCodeAt(0) === 0xFEFF) {
                     text = text.slice(1);
                 }
-                params = safeParseJSON(text);
+                return api.parseJsonText(text);
             }
         } catch (e1) {
         }
-    }
-    params.pipeline_force_layout_mode = "templateB";
+        return {};
+    };
 
-    // 写回参数文件
-    if (paramsFile.open("w")) {
-        paramsFile.encoding = "UTF-8";
-        paramsFile.write(safeStringifyJSON(params));
-        paramsFile.close();
-    }
+    api.getScriptArgValue = function (nameText, scriptFilePath) {
+        var params = api.loadPipelineParams(scriptFilePath);
+        return params[nameText] || null;
+    };
 
-    try {
-        // 由 templateB 自己控制入口时机，而不是让 templateA 在 eval 后立刻自执行。
-        $.global.__AUTORAINBOW_SUPPRESS_AUTO_MAIN__ = true;
-        $.evalFile(engineFile);
-        delete $.global.__AUTORAINBOW_SUPPRESS_AUTO_MAIN__;
+    api.isTruthyArg = function (valueText) {
+        var text = String(valueText || "").toLowerCase();
+        return text === "1" || text === "true" || text === "yes";
+    };
 
-        var runner = $.global.__AUTORAINBOW_CORE__ && $.global.__AUTORAINBOW_CORE__.layoutRunner;
-        if (!runner || typeof runner.runMain !== "function") {
-            throw new Error("共享运行器未正确导出");
+    api.toNumberOrDefault = function (value, defaultValue) {
+        var num = Number(value);
+        if (isNaN(num)) {
+            return defaultValue;
         }
-        runner.runMain("templateB");
-    } finally {
-        try { delete $.global.__AUTORAINBOW_SUPPRESS_AUTO_MAIN__; } catch (e2) {}
-        delete params.pipeline_force_layout_mode;
-        if (paramsFile.open("w")) {
-            paramsFile.encoding = "UTF-8";
-            paramsFile.write(safeStringifyJSON(params));
-            paramsFile.close();
-        }
-    }
+        return num;
+    };
+
+    root.runtimeParams = api;
 }());

@@ -30,7 +30,7 @@ def sample_docx(tmp_path):
     run.add_picture(str(img_path), width=Inches(1))
     doc.add_paragraph("正文文本")
 
-    section_dir = tmp_path / "C_inputs" / "1_本周头条"
+    section_dir = tmp_path / "inputs"
     section_dir.mkdir(parents=True)
     path = section_dir / "sample.docx"
     doc.save(str(path))
@@ -43,7 +43,7 @@ def text_only_docx(tmp_path):
     from docx import Document
     doc = Document()
     doc.add_paragraph("纯文本内容")
-    section_dir = tmp_path / "C_inputs" / "1_本周头条"
+    section_dir = tmp_path / "inputs"
     section_dir.mkdir(parents=True)
     path = section_dir / "text_only.docx"
     doc.save(str(path))
@@ -81,15 +81,15 @@ def test_images(tmp_path):
 def template_setup(tmp_path):
     """生成模板配置目录 + 相关路径"""
     for tid in ["1_本周头条", "4_一句话"]:
-        d = tmp_path / "A_templates" / tid
+        d = tmp_path / "templates" / tid
         d.mkdir(parents=True)
         (d / "config.json").write_text(json.dumps({
             "layout_mode": "templateA",
         }))
     return {
-        "templates_root": str(tmp_path / "A_templates"),
-        "inputs_root": str(tmp_path / "C_inputs"),
-        "workspace_root": str(tmp_path / "B_outputs"),
+        "templates_root": str(tmp_path / "templates"),
+        "inputs_root": str(tmp_path / "inputs"),
+        "workspace_root": str(tmp_path / "outputs"),
     }
 
 
@@ -125,7 +125,7 @@ class TestDocxListToJson:
         os.makedirs(output_dir, exist_ok=True)
 
         elements = docx_list_to_json(
-            source_items=[sample_docx],
+            source_items=[{"kind": "word", "path": sample_docx, "section_name": "1_本周头条"}],
             template_config_map=template_map,
             input_root_dir=template_setup["inputs_root"],
             doc_workspace_root_dir=output_dir,
@@ -172,7 +172,10 @@ class TestDocxListToJson:
         os.makedirs(output_dir, exist_ok=True)
 
         elements = docx_list_to_json(
-            source_items=[sample_docx, str(doc2_path)],
+            source_items=[
+                {"kind": "word", "path": sample_docx, "section_name": "1_本周头条"},
+                {"kind": "word", "path": str(doc2_path), "section_name": "1_本周头条"},
+            ],
             template_config_map=template_map,
             input_root_dir=template_setup["inputs_root"],
             doc_workspace_root_dir=output_dir,
@@ -181,7 +184,7 @@ class TestDocxListToJson:
         assert len(elements) > 0
 
         # 每个文档应生成独立的任务缓存 JSON
-        output_jsons = list((Path(output_dir) / "_cache").glob("*.json"))
+        output_jsons = list((Path(output_dir) / "caches").glob("*.json"))
         assert len(output_jsons) >= 2
 
 

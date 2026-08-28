@@ -12,60 +12,216 @@
                 return JSON.parse(text);
             }
         } catch (e1) {}
-        return eval("(" + text + ")");
+        try {
+            return parseES3Json(text);
+        } catch (e2) {
+            return null;
+        }
     }
+
+    function parseES3Json(text) {
+        if (typeof JSON !== "undefined" && JSON.parse) {
+            return JSON.parse(text);
+        }
+        var src = String(text || "");
+        if (src.charCodeAt(0) === 0xFEFF) {
+            src = src.slice(1);
+        }
+        var pos = 0;
+        function skipWs() {
+            while (pos < src.length) {
+                var c = src.charAt(pos);
+                if (c === " " || c === "\t" || c === "\r" || c === "\n") {
+                    pos += 1;
+                } else {
+                    break;
+                }
+            }
+        }
+        function fail(msg) {
+            throw new Error("JSON 解析失败: " + msg + " (位置 " + pos + ")");
+        }
+        function parseString() {
+            if (src.charAt(pos) !== "\"") {
+                fail("期望字符串");
+            }
+            pos += 1;
+            var out = "";
+            while (pos < src.length) {
+                var ch = src.charAt(pos);
+                if (ch === "\"") {
+                    pos += 1;
+                    return out;
+                }
+                if (ch === "\\") {
+                    pos += 1;
+                    var esc = src.charAt(pos);
+                    if (esc === "u") {
+                        var hex = src.substr(pos + 1, 4);
+                        out += String.fromCharCode(parseInt(hex, 16));
+                        pos += 5;
+                    } else if (esc === "n") {
+                        out += "\n";
+                        pos += 1;
+                    } else if (esc === "t") {
+                        out += "\t";
+                        pos += 1;
+                    } else if (esc === "r") {
+                        out += "\r";
+                        pos += 1;
+                    } else if (esc === "b") {
+                        out += "\b";
+                        pos += 1;
+                    } else if (esc === "f") {
+                        out += "\f";
+                        pos += 1;
+                    } else if (esc === "/") {
+                        out += "/";
+                        pos += 1;
+                    } else if (esc === "\\") {
+                        out += "\\";
+                        pos += 1;
+                    } else if (esc === "\"") {
+                        out += "\"";
+                        pos += 1;
+                    } else {
+                        fail("未知转义 \\" + esc);
+                    }
+                } else {
+                    out += ch;
+                    pos += 1;
+                }
+            }
+            fail("字符串未闭合");
+        }
+        function parseNumber() {
+            var start = pos;
+            if (src.charAt(pos) === "-") {
+                pos += 1;
+            }
+            while (pos < src.length && "0123456789.eE+-".indexOf(src.charAt(pos)) >= 0) {
+                pos += 1;
+            }
+            var numText = src.substring(start, pos);
+            var num = Number(numText);
+            if (isNaN(num)) {
+                fail("非法数字: " + numText);
+            }
+            return num;
+        }
+        function parseLiteral(word, value) {
+            if (src.substr(pos, word.length) !== word) {
+                fail("非法字面量: " + word);
+            }
+            pos += word.length;
+            return value;
+        }
+        function parseArray() {
+            pos += 1;
+            var arr = [];
+            skipWs();
+            if (src.charAt(pos) === "]") {
+                pos += 1;
+                return arr;
+            }
+            for (;;) {
+                arr.push(parseValue());
+                skipWs();
+                var c = src.charAt(pos);
+                if (c === ",") {
+                    pos += 1;
+                    continue;
+                }
+                if (c === "]") {
+                    pos += 1;
+                    return arr;
+                }
+                fail("数组期望 , 或 ]");
+            }
+        }
+        function parseObject() {
+            pos += 1;
+            var obj = {};
+            skipWs();
+            if (src.charAt(pos) === "}") {
+                pos += 1;
+                return obj;
+            }
+            for (;;) {
+                skipWs();
+                if (src.charAt(pos) !== "\"") {
+                    fail("对象键必须是字符串");
+                }
+                var key = parseString();
+                skipWs();
+                if (src.charAt(pos) !== ":") {
+                    fail("对象期望 :");
+                }
+                pos += 1;
+                obj[key] = parseValue();
+                skipWs();
+                var c = src.charAt(pos);
+                if (c === ",") {
+                    pos += 1;
+                    continue;
+                }
+                if (c === "}") {
+                    pos += 1;
+                    return obj;
+                }
+                fail("对象期望 , 或 }");
+            }
+        }
+        function parseValue() {
+            skipWs();
+            var c = src.charAt(pos);
+            if (c === "{") {
+                return parseObject();
+            }
+            if (c === "[") {
+                return parseArray();
+            }
+            if (c === "\"") {
+                return parseString();
+            }
+            if (c === "t") {
+                return parseLiteral("true", true);
+            }
+            if (c === "f") {
+                return parseLiteral("false", false);
+            }
+            if (c === "n") {
+                return parseLiteral("null", null);
+            }
+            if (c === "-" || (c >= "0" && c <= "9")) {
+                return parseNumber();
+            }
+            fail("非法值: " + c);
+        }
+        var result = parseValue();
+        skipWs();
+        if (pos < src.length) {
+            fail("尾部多余内容");
+        }
+        return result;
+    }
+
 
     var WATCHER_NAME = "AutoRainbowDispatchWatcher";
 
     function resolveProjectRoot() {
-        var homeDir = Folder("~");
-        var configPaths = [
-            homeDir.fsName + "/autorainbow_config.json",
-            homeDir.fsName + "/.autorainbow/config.json"
-        ];
-        for (var p = 0; p < configPaths.length; p++) {
-            var configFile = File(configPaths[p]);
-            if (configFile.exists) {
-                try {
-                    if (configFile.open("r")) {
-                        configFile.encoding = "UTF-8";
-                        var text = configFile.read();
-                        configFile.close();
-                        if (text.charCodeAt(0) === 0xFEFF) {
-                            text = text.slice(1);
-                        }
-                        var cfg = safeParseJSON(text);
-                        if (cfg && cfg.project_root) {
-                            var root = Folder(cfg.project_root);
-                            if (root.exists) {
-                                return root;
-                            }
-                        }
-                    }
-                } catch (e) {
-                }
+        // 2026-08-18：不再读家目录配置（~/autorainbow_config.json 等）。
+        // 优先使用安装时注入的项目根（install_watcher 写入副本的常量）；
+        // 源码直接运行（未安装）时回退到脚本位置反推。
+        // 1) 安装注入的项目根
+        if (typeof __AUTO_INJECTED_PROJECT_ROOT__ === "string" && __AUTO_INJECTED_PROJECT_ROOT__) {
+            var injRoot = Folder(__AUTO_INJECTED_PROJECT_ROOT__);
+            if (injRoot.exists && Folder(injRoot.fsName + "/workspace").exists) {
+                return injRoot;
             }
         }
-        // 回退2：从 ~/autorainbow_project_root.txt 读取项目根（纯文本，非隐藏路径）
-        try {
-            var rootFile = File(homeDir.fsName + "/autorainbow_project_root.txt");
-            if (rootFile.exists) {
-                if (rootFile.open("r")) {
-                    var rootText = rootFile.read();
-                    rootFile.close();
-                    rootText = rootText.replace(/\\n|\\r/g, "").trim();
-                    if (rootText.length > 0) {
-                        var root = Folder(rootText);
-                        if (root.exists && Folder(root.fsName + "/workspace").exists) {
-                            return root;
-                        }
-                    }
-                }
-            }
-        } catch (e3) {
-        }
-
-        // 回退3：尝试从 watcher 脚本位置推算项目根目录
+        // 2) 尝试从 watcher 脚本位置推算项目根目录（源码运行场景：
+        //    pipeline/jsx/create_layout_startup_watcher.jsx → 上溯3级）
         try {
             var watcherFile = File($.fileName);
             var watcherDir = watcherFile.parent;
@@ -94,12 +250,12 @@
     var SCRIPT_DIR = Folder(PROJECT_ROOT.fsName + "/pipeline/jsx");
     var DISPATCH_SCRIPT = File(SCRIPT_DIR.fsName + "/create_layout_dispatch.jsx");
     var WORKSPACE_ROOT = Folder(PROJECT_ROOT.fsName + "/workspace");
-    var QUEUE_ROOT = Folder(WORKSPACE_ROOT.fsName + "/B_outputs/queue");
+    var QUEUE_ROOT = Folder(WORKSPACE_ROOT.fsName + "/.runtime/queue");
     var PENDING_DIR = Folder(QUEUE_ROOT.fsName + "/pending");
     var RUNNING_DIR = Folder(QUEUE_ROOT.fsName + "/running");
     var DONE_DIR = Folder(QUEUE_ROOT.fsName + "/done");
     var ERROR_DIR = Folder(QUEUE_ROOT.fsName + "/error");
-    var LOG_FILE = File(WORKSPACE_ROOT.fsName + "/B_outputs/logs/watcher.log");
+    var LOG_FILE = File(WORKSPACE_ROOT.fsName + "/.runtime/logs/watcher.log");
     var HEARTBEAT_FILE = File(QUEUE_ROOT.fsName + "/.watcher_heartbeat");
     var lastHeartbeatTime = 0;
 
@@ -219,10 +375,36 @@
         if (!files || files.length === 0) {
             return null;
         }
-        files.sort(function (a, b) {
+        // 2026-08-25：投递先写 pending + osascript 加速触发（direct_trigger 标记）。
+        // 创建 20s 内跳过 direct_trigger 任务（等 osascript 处理，避免重复排版）；
+        // osascript 失败/排队超时后由 watcher 兜底拾取。
+        var nowMs = (new Date()).getTime();
+        var candidates = [];
+        for (var fi = 0; fi < files.length; fi += 1) {
+            var f = files[fi];
+            var skip = false;
+            if (f.modified && (nowMs - f.modified.getTime()) < 20000) {
+                try {
+                    f.open("r");
+                    f.encoding = "UTF-8";
+                    var taskText = f.read();
+                    f.close();
+                    var taskData = safeParseJSON(taskText);
+                    if (taskData && taskData.direct_trigger) {
+                        skip = true;
+                    }
+                } catch (eParse) {
+                    try { f.close(); } catch (eClose) {}
+                }
+            }
+            if (!skip) {
+                candidates.push(f);
+            }
+        }
+        candidates.sort(function (a, b) {
             return a.modified.getTime() - b.modified.getTime();
         });
-        return files[0];
+        return candidates.length > 0 ? candidates[0] : null;
     }
 
     function processOneTask() {
@@ -302,6 +484,32 @@
         sleep: 1000
     });
     idleTask.addEventListener(IdleEvent.ON_IDLE, handler);
+
+    // 2026-08-25：idleTasks 的 ON_IDLE 在 InDesign 忙/后台时触发极慢（实测 ~28s 一次），
+    // 加 3s 定时器兜底，保证心跳与任务处理不依赖空闲。
+    // $.setInterval 实测不可用，依次尝试 app.setInterval / app.setTimeout 递归（ScriptUI 定时器）。
+    var timerOk = false;
+    try {
+        if (typeof app.setInterval === "function") {
+            app.setInterval(handler, 3000);
+            timerOk = true;
+        }
+    } catch (eTimer) {
+        writeLog("app.setInterval 不可用: " + formatError(eTimer));
+    }
+    if (!timerOk) {
+        try {
+            (function scheduleTimer() {
+                app.setTimeout(function () {
+                    try { handler(); } catch (eTimer2) { writeLog("定时器兜底异常: " + formatError(eTimer2)); }
+                    scheduleTimer();
+                }, 3000);
+            })();
+            timerOk = true;
+        } catch (eTimer3) {
+            writeLog("定时器兜底不可用，仅 idleTasks: " + formatError(eTimer3));
+        }
+    }
 
     ensureFolder(PENDING_DIR);
     ensureFolder(RUNNING_DIR);

@@ -4,23 +4,27 @@ node_modules/
 # Build output (very large)
 src-tauri/target/
 app/tauri_console/dist/
-build/
+
+# Note: private/ is version-controlled in main/dev but excluded from the public
+# release by private/release_to_public.py (copyrighted/internal data).
 
 # Runtime data
 workspace/.ui_state.json
 workspace/indesign_layout.log
-workspace/B_outputs/
-workspace/C_inputs/
+workspace/outputs/
+workspace/.runtime/
+workspace/inputs/
+workspace/templates/*/.indd
+workspace/templates/*.indd
 workspace/**/logs/
 workspace/**/*.log
 workspace/**/*.tmp
 workspace/**/*.cache
 workspace/**/queue/
-workspace/A_templates/**/.FillReplaceHolder.jpg
-workspace/A_templates/**/*_objects.json
 
 # InDesign files (too large for git)
 *.indd
+*.idlk
 
 # OS files
 .DS_Store
@@ -36,5 +40,8 @@ autorainbow_config.json
 .claude/
 *.local.json
 
-# Local/private template reference files
-模板/
+# Test assets (copyrighted images, user-provided; tests skip when missing)
+workspace/test_assets/
+
+# Local raw material archives (large binaries: psd/idml/indd)
+🌈彩虹周报/

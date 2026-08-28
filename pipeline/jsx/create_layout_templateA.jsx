@@ -1,107 +1,44 @@
-function parseJsonText(text) {
-    if (typeof JSON !== "undefined" && JSON.parse) {
-        return JSON.parse(text);
+(function ensureSharedCoreLoaded() {
+    var scriptDir = File($.fileName).parent;
+    var sharedFiles = [
+        "core_runtime_params.jsx",
+        "core_template_config.jsx",
+        "core_page_items.jsx",
+        "core_output_and_log.jsx",
+        "core_page_state.jsx",
+        "core_templateB_logic.jsx",
+        "core_templateD_logic.jsx",
+        "core_layout_runner.jsx"
+    ];
+    var i;
+    for (i = 0; i < sharedFiles.length; i += 1) {
+        var sharedFile = File(scriptDir.fsName + "/" + sharedFiles[i]);
+        if (!sharedFile.exists) {
+            throw new Error("缺少公共核心脚本: " + sharedFile.fsName);
+        }
+        $.evalFile(sharedFile);
     }
-    return eval("(" + text + ")");
+    if (!$.global.__AUTORAINBOW_CORE__ || !$.global.__AUTORAINBOW_CORE__.runtimeParams || !$.global.__AUTORAINBOW_CORE__.templateConfig || !$.global.__AUTORAINBOW_CORE__.pageItems || !$.global.__AUTORAINBOW_CORE__.outputAndLog || !$.global.__AUTORAINBOW_CORE__.pageState || !$.global.__AUTORAINBOW_CORE__.templateBLogic || !$.global.__AUTORAINBOW_CORE__.templateDLogic || !$.global.__AUTORAINBOW_CORE__.layoutRunner) {
+        throw new Error("公共核心脚本加载失败");
+    }
+}());
+
+var __autoRainbowCore = $.global.__AUTORAINBOW_CORE__;
+
+function parseJsonText(text) {
+    return __autoRainbowCore.runtimeParams.parseJsonText(text);
 }
 
 function stringifyJsonText(obj, pretty) {
-    try {
-        if (typeof JSON !== "undefined" && JSON.stringify) {
-            return pretty ? JSON.stringify(obj, null, 2) : JSON.stringify(obj);
-        }
-    } catch (e) {
-    }
-
-    function quoteString(value) {
-        return "\"" + String(value)
-            .replace(/\\/g, "\\\\")
-            .replace(/"/g, "\\\"")
-            .replace(/\r/g, "\\r")
-            .replace(/\n/g, "\\n")
-            .replace(/\t/g, "\\t") + "\"";
-    }
-
-    function encode(value, level) {
-        var i;
-        var k;
-        var keys;
-        var parts;
-        var indent;
-        var childIndent;
-        if (value === null || value === undefined) {
-            return "null";
-        }
-        if (typeof value === "string") {
-            return quoteString(value);
-        }
-        if (typeof value === "number" || typeof value === "boolean") {
-            return String(value);
-        }
-        if (value instanceof Array) {
-            parts = [];
-            for (i = 0; i < value.length; i += 1) {
-                parts.push(encode(value[i], level + 1));
-            }
-            if (!pretty) {
-                return "[" + parts.join(",") + "]";
-            }
-            indent = new Array(level + 1).join("  ");
-            childIndent = new Array(level + 2).join("  ");
-            return parts.length ? "[\n" + childIndent + parts.join(",\n" + childIndent) + "\n" + indent + "]" : "[]";
-        }
-        if (typeof value === "object") {
-            parts = [];
-            keys = [];
-            for (k in value) {
-                if (value.hasOwnProperty(k)) {
-                    keys.push(k);
-                }
-            }
-            for (i = 0; i < keys.length; i += 1) {
-                k = keys[i];
-                parts.push(quoteString(k) + (pretty ? ": " : ":") + encode(value[k], level + 1));
-            }
-            if (!pretty) {
-                return "{" + parts.join(",") + "}";
-            }
-            indent = new Array(level + 1).join("  ");
-            childIndent = new Array(level + 2).join("  ");
-            return parts.length ? "{\n" + childIndent + parts.join(",\n" + childIndent) + "\n" + indent + "}" : "{}";
-        }
-        return quoteString(String(value));
-    }
-
-    return encode(obj, 0);
+    return __autoRainbowCore.runtimeParams.stringifyJsonText(obj, pretty);
 }
 
 function resolveFile(baseFolder, pathText) {
-    if (!pathText) {
-        throw new Error("路径不能为空");
-    }
-    if (pathText.indexOf("/") === 0) {
-        return File(pathText);
-    }
-    if (pathText.length > 2 && pathText.charAt(1) === ":" && (pathText.charAt(2) === "\\" || pathText.charAt(2) === "/")) {
-        return File(pathText);
-    }
-    return File(baseFolder.fsName + "/" + pathText);
+    return __autoRainbowCore.templateConfig.resolveFile(baseFolder, pathText);
 }
 
 function readJsonFile(fileObj) {
-    if (!fileObj.exists) {
-        throw new Error("文件不存在: " + fileObj.fsName);
-    }
-
-    if (!fileObj.open("r")) {
-        throw new Error("文件打开失败: " + fileObj.fsName);
-    }
-
-    fileObj.encoding = "UTF-8";
-    var content = fileObj.read();
-    fileObj.close();
-
-    return parseJsonText(content);
+    return __autoRainbowCore.templateConfig.readJsonFile(fileObj);
 }
 
 function collectWorkspaceOutputJsonFiles(folderObj, list) {
@@ -123,7 +60,7 @@ function collectWorkspaceOutputJsonFiles(folderObj, list) {
 }
 
 function readRecordsFromWorkspace(projectRoot, config, logs) {
-    var workspacePath = config.doc_workspace_dir || "B_outputs";
+    var workspacePath = config.outputs_dir || config.doc_workspace_dir || "workspace/outputs";
     var workspaceFolder = Folder(resolveFile(projectRoot, workspacePath).fsName);
     if (!workspaceFolder.exists) {
         throw new Error("未找到文档输出目录: " + workspaceFolder.fsName);
@@ -179,474 +116,103 @@ function readRecordsFromWorkspace(projectRoot, config, logs) {
 }
 
 function ensureFolderExists(folderObj) {
-    if (!folderObj || folderObj.exists) {
-        return true;
-    }
-    if (folderObj.parent && !folderObj.parent.exists) {
-        if (!ensureFolderExists(folderObj.parent)) {
-            return false;
-        }
-    }
-    return folderObj.create();
+    return __autoRainbowCore.outputAndLog.ensureFolderExists(folderObj);
 }
 
 function writeLogFile(fileObj, logs) {
-    if (!ensureFolderExists(fileObj.parent)) {
-        return;
-    }
-    if (!fileObj.open("w")) {
-        return;
-    }
-
-    fileObj.encoding = "UTF-8";
-    fileObj.write(logs.join("\n"));
-    fileObj.close();
+    return __autoRainbowCore.outputAndLog.writeLogFile(fileObj, logs);
 }
 
 function writeTextFile(fileObj, textValue) {
-    if (!ensureFolderExists(fileObj.parent)) {
-        return false;
-    }
-    if (!fileObj.open("w")) {
-        return false;
-    }
-    fileObj.encoding = "UTF-8";
-    fileObj.write(textValue);
-    fileObj.close();
-    return true;
+    return __autoRainbowCore.outputAndLog.writeTextFile(fileObj, textValue);
 }
 
 function nowText() {
-    var d = new Date();
-    var mm = ("0" + (d.getMonth() + 1)).slice(-2);
-    var dd = ("0" + d.getDate()).slice(-2);
-    var hh = ("0" + d.getHours()).slice(-2);
-    var mi = ("0" + d.getMinutes()).slice(-2);
-    var ss = ("0" + d.getSeconds()).slice(-2);
-    return d.getFullYear() + "-" + mm + "-" + dd + " " + hh + ":" + mi + ":" + ss;
+    return __autoRainbowCore.outputAndLog.nowText();
 }
 
 function pushLog(logs, msg) {
-    logs.push("[" + nowText() + "] " + msg);
+    return __autoRainbowCore.outputAndLog.pushLog(logs, msg);
 }
 
 function createPageBreakReport(inputJsonPath) {
-    return {
-        input_json: inputJsonPath || "",
-        auto_break_indices: [],
-        records: [],
-        seen: {}
-    };
+    return __autoRainbowCore.outputAndLog.createPageBreakReport(inputJsonPath);
 }
 
 function recordAutoPageBreak(report, itemIndex, modeText, docName, reasonText) {
-    var n = Number(itemIndex);
-    if (!report || isNaN(n) || n <= 1) {
-        return;
-    }
-    var key = String(n);
-    if (!report.seen[key]) {
-        report.seen[key] = true;
-        report.auto_break_indices.push(n);
-    }
-    report.records.push({
-        index: n,
-        mode: String(modeText || ""),
-        doc_name: String(docName || ""),
-        reason: String(reasonText || "")
-    });
+    return __autoRainbowCore.outputAndLog.recordAutoPageBreak(report, itemIndex, modeText, docName, reasonText);
 }
 
 function getPageBreakReportFile(projectRoot, inputJsonPath) {
-    if (!inputJsonPath) {
-        return null;
-    }
-    var inputFile = File(inputJsonPath);
-    var nameText = String(inputFile.name || "page_breaks.json");
-    var dotIdx = nameText.lastIndexOf(".");
-    if (dotIdx > 0) {
-        nameText = nameText.substring(0, dotIdx);
-    }
-    return File(projectRoot.fsName + "/workspace/B_outputs/_page_breaks/" + nameText + ".json");
+    return __autoRainbowCore.outputAndLog.getPageBreakReportFile(projectRoot, inputJsonPath);
 }
 
 function writePageBreakReport(projectRoot, inputJsonPath, report, logs) {
-    var reportFile = getPageBreakReportFile(projectRoot, inputJsonPath);
-    if (!reportFile) {
-        return;
-    }
-    var payload = {
-        input_json: inputJsonPath || "",
-        auto_break_indices: report && report.auto_break_indices ? report.auto_break_indices : [],
-        records: report && report.records ? report.records : [],
-        updated_at: nowText()
-    };
-    if (writeTextFile(reportFile, stringifyJsonText(payload, true))) {
-        pushLog(logs, "已记录自动分页: " + reportFile.fsName + "，分页点=" + payload.auto_break_indices.length);
-    } else {
-        pushLog(logs, "记录自动分页失败: " + reportFile.fsName);
-    }
+    return __autoRainbowCore.outputAndLog.writePageBreakReport(projectRoot, inputJsonPath, report, logs);
 }
 
 function closeOpenDocumentByPath(targetFile, keepDoc, logs) {
-    if (!targetFile) {
-        return 0;
-    }
-    var closed = 0;
-    var targetPath = "";
-    try {
-        targetPath = File(targetFile).fsName;
-    } catch (e0) {
-        targetPath = String(targetFile);
-    }
-    var i;
-    for (i = app.documents.length - 1; i >= 0; i -= 1) {
-        var oneDoc = null;
-        try {
-            oneDoc = app.documents[i];
-        } catch (e1) {
-            continue;
-        }
-        if (!oneDoc || !oneDoc.isValid || oneDoc === keepDoc) {
-            continue;
-        }
-        try {
-            if (oneDoc.saved && oneDoc.fullName && File(oneDoc.fullName).fsName === targetPath) {
-                oneDoc.close(SaveOptions.NO);
-                closed += 1;
-                pushLog(logs, "已关闭占用输出文件的 InDesign 文档: " + targetPath);
-            }
-        } catch (e2) {
-            pushLog(logs, "关闭占用输出文件的文档失败: " + targetPath + "，错误=" + e2);
-        }
-    }
-    return closed;
+    return __autoRainbowCore.outputAndLog.closeOpenDocumentByPath(targetFile, keepDoc, logs);
 }
 
-// 缓存的参数对象（避免重复读取文件）
-var _pipelineParamsCache = null;
-
 function loadPipelineParams() {
-    if (_pipelineParamsCache !== null) {
-        return _pipelineParamsCache;
-    }
-    try {
-        var scriptFile = File($.fileName);
-        var scriptFolder = scriptFile.parent;
-        var paramsFile = File(scriptFolder.fsName + "/_pipeline_params.json");
-        if (paramsFile.exists) {
-            if (paramsFile.open("r")) {
-                paramsFile.encoding = "UTF-8";
-                var text = paramsFile.read();
-                paramsFile.close();
-                if (text.charCodeAt(0) === 0xFEFF) {
-                    text = text.slice(1);
-                }
-                _pipelineParamsCache = parseJsonText(text);
-                return _pipelineParamsCache;
-            }
-        }
-    } catch (e1) {
-    }
-    _pipelineParamsCache = {};
-    return _pipelineParamsCache;
+    return __autoRainbowCore.runtimeParams.loadPipelineParams($.fileName);
 }
 
 function getScriptArgValue(nameText) {
-    var params = loadPipelineParams();
-    return params[nameText] || null;
+    return __autoRainbowCore.runtimeParams.getScriptArgValue(nameText, $.fileName);
 }
 
 function isTruthyArg(valueText) {
-    var text = String(valueText || "").toLowerCase();
-    return text === "1" || text === "true" || text === "yes";
+    return __autoRainbowCore.runtimeParams.isTruthyArg(valueText);
 }
 
 function toNumberOrDefault(value, defaultValue) {
-    var num = Number(value);
-    if (isNaN(num)) {
-        return defaultValue;
-    }
-    return num;
+    return __autoRainbowCore.runtimeParams.toNumberOrDefault(value, defaultValue);
 }
 
 function findPageItemByLabel(page, labelName) {
-    if (!labelName) {
-        return null;
-    }
-
-    var items = page.allPageItems;
-    var i;
-    for (i = 0; i < items.length; i += 1) {
-        if (items[i].label === labelName) {
-            return items[i];
-        }
-    }
-    return null;
+    return __autoRainbowCore.pageItems.findPageItemByLabel(page, labelName);
 }
 
 function findPageItemByLabels(page, labelNames) {
-    if (!labelNames || !(labelNames instanceof Array)) {
-        return null;
-    }
-    var i;
-    for (i = 0; i < labelNames.length; i += 1) {
-        var label = labelNames[i];
-        if (!label) {
-            continue;
-        }
-        var item = findPageItemByLabel(page, label);
-        if (item) {
-            return item;
-        }
-    }
-    return null;
+    return __autoRainbowCore.pageItems.findPageItemByLabels(page, labelNames);
 }
 
 function buildDividerLabelCandidates(labelText) {
-    var text = String(labelText || "");
-    var list = [];
-    var seen = {};
-
-    function addOne(v) {
-        var key = String(v || "");
-        if (!key) {
-            return;
-        }
-        if (seen[key]) {
-            return;
-        }
-        seen[key] = true;
-        list.push(key);
-    }
-
-    addOne(text);
-    // 兼容 divde/divide 常见拼写差异
-    addOne(text.split("divde").join("divide"));
-    addOne(text.split("divide").join("divde"));
-    // 兼容下划线风格差异
-    addOne(text.split("__").join("_"));
-
-    return list;
+    return __autoRainbowCore.pageItems.buildDividerLabelCandidates(labelText);
 }
 
 function collectPageLabels(page, maxCount) {
-    var labels = [];
-    var seen = {};
-    var limit = Number(maxCount);
-    if (isNaN(limit) || limit <= 0) {
-        limit = 80;
-    }
-    if (!page || !page.isValid) {
-        return labels;
-    }
-    var items = page.allPageItems;
-    var i;
-    for (i = 0; i < items.length; i += 1) {
-        var label = "";
-        try {
-            label = String(items[i].label || "");
-        } catch (e1) {
-            label = "";
-        }
-        if (!label || seen[label]) {
-            continue;
-        }
-        seen[label] = true;
-        labels.push(label);
-        if (labels.length >= limit) {
-            break;
-        }
-    }
-    return labels;
+    return __autoRainbowCore.pageItems.collectPageLabels(page, maxCount);
 }
 
 function collectConfigCandidates(baseFolder, activeDoc) {
-    var candidates = [];
-    var seen = {};
-    var roots = [];
-
-    roots.push(baseFolder);
-
-    try {
-        if (activeDoc && activeDoc.saved && activeDoc.fullName) {
-            roots.unshift(File(activeDoc.fullName).parent);
-        }
-    } catch (e1) {
-    }
-
-    var r;
-    for (r = 0; r < roots.length; r += 1) {
-        var current = roots[r];
-        var guard = 0;
-
-        while (current && current.fsName && guard < 30) {
-            var paths = [
-                current.fsName + "/workspace/A_templates/config.json",
-                current.fsName + "/workspace/config.json",
-                current.fsName + "/D/A_templates/config.json",
-                current.fsName + "/D/config.json",
-                current.fsName + "/A_templates/config.json",
-                current.fsName + "/config.json"
-            ];
-            var i;
-            for (i = 0; i < paths.length; i += 1) {
-                var p = paths[i];
-                if (!seen[p]) {
-                    seen[p] = true;
-                    candidates.push(File(p));
-                }
-            }
-            if (!current.parent || current.parent.fsName === current.fsName) {
-                break;
-            }
-            current = current.parent;
-            guard += 1;
-        }
-    }
-
-    return candidates;
+    return __autoRainbowCore.templateConfig.collectConfigCandidates(baseFolder, activeDoc);
 }
 
 function getConfigFile(baseFolder, activeDoc) {
-    var candidates = collectConfigCandidates(baseFolder, activeDoc);
-
-    var i;
-    for (i = 0; i < candidates.length; i += 1) {
-        if (candidates[i].exists) {
-            return candidates[i];
-        }
-    }
-
-    var tried = [];
-    for (i = 0; i < candidates.length; i += 1) {
-        tried.push(candidates[i].fsName);
-    }
-
-    throw new Error("未找到配置文件，已尝试: " + tried.join(", "));
+    return __autoRainbowCore.templateConfig.getConfigFile(baseFolder, activeDoc);
 }
 
 function getProjectRootFromConfig(configFile) {
-    var parentFolder = configFile.parent;
-    if (!parentFolder) {
-        return null;
-    }
-
-    // 全局配置：.../A_templates/config.json
-    if (parentFolder.name === "A_templates") {
-        return parentFolder.parent;
-    }
-
-    // 模板内配置：.../A_templates/<template_id>/config.json
-    if (parentFolder.parent && parentFolder.parent.name === "A_templates") {
-        return parentFolder.parent.parent;
-    }
-
-    // 兜底：返回 config 所在目录
-    return parentFolder;
+    return __autoRainbowCore.templateConfig.getProjectRootFromConfig(configFile);
 }
 
 function normalizeLayoutMode(modeText) {
-    var raw = String(modeText || "");
-    var key = raw.toLowerCase();
-    key = key.replace(/^\s+|\s+$/g, "");
-
-    // 兼容旧命名迁移
-    if (!key || key === "templatea" || key === "legacy" || key === "default" || key === "old_rule") {
-        return "templateA";
-    }
-    if (key === "a" || key === "templateb") {
-        return "templateB";
-    }
-    if (key === "b" || key === "templatec") {
-        return "templateC";
-    }
-    if (key === "c" || key === "templated") {
-        return "templateD";
-    }
-
-    return String(modeText);
+    return __autoRainbowCore.templateConfig.normalizeLayoutMode(modeText);
 }
 
 function validateTemplateConfig(templateId, t) {
-    if (!t || typeof t !== "object") {
-        throw new Error("模板配置无效: " + templateId);
-    }
-
-    var baseSourceIndex = Number(t.source_page_index || 1);
-    if (isNaN(baseSourceIndex) || baseSourceIndex < 1) {
-        throw new Error("模板 source_page_index 无效: " + templateId);
-    }
-
-    var bodyTextLabel = t.body_text_proto_label || t.text_proto_label || "proto_text";
-    var bodyImageLabel = t.body_image_proto_label || t.image_proto_label || "proto_image";
-
-    return {
-        layout_mode: normalizeLayoutMode(t.layout_mode),
-        source_page_index: baseSourceIndex,
-        body_text_proto_label: bodyTextLabel,
-        body_image_proto_label: bodyImageLabel,
-        card_proto_label: t.card_proto_label || "proto_card",
-        main_heading_label: t.main_heading_label || "main_heading",
-        sub_heading_label: t.sub_heading_label || "sub_heading",
-        title_image_label: t.title_image_label || "title_image",
-        column_space_label: t.column_space_label || "column_space",
-        column_space2_label: t.column_space2_label || "column_space2",
-        photo_group_label: t.photo_group_label || "photo_group",
-        first_group_source_page_index: Number(t.first_group_source_page_index || baseSourceIndex || 1),
-        other_group_source_page_index: Number(t.other_group_source_page_index || 2),
-        first_divider_label: t.first_divider_label || "divide_line_birthday",
-        first_image_proto_label: t.first_image_proto_label || "birthday_image",
-        first_text_proto_label: t.first_text_proto_label || "birthday_text",
-        other_heading_label: t.other_heading_label || "paragraph_heading",
-        other_divider_label: t.other_divider_label || "divide_line",
-        other_image_proto_label: t.other_image_proto_label || "proto_image",
-        other_text_proto_label: t.other_text_proto_label || "proto_text",
-        divider_offset_from_heading: toNumberOrDefault(t.divider_offset_from_heading, -12),
-        photo_top_gap: toNumberOrDefault(t.photo_top_gap, 48),
-        text_top_gap: toNumberOrDefault(t.text_top_gap, 48),
-        photo_row_gap: toNumberOrDefault(t.photo_row_gap, 12),
-        start_y: t.start_y,
-        continue_start_y: t.continue_start_y,
-        content_bottom_soft: t.content_bottom_soft,
-        content_bottom_hard: t.content_bottom_hard,
-        content_bottom: t.content_bottom
-    };
+    return __autoRainbowCore.templateConfig.validateTemplateConfig(templateId, t);
 }
 
 function getTemplatesRootFolder(projectRoot, globalConfig) {
-    var templatesRootPath = globalConfig.templates_root_dir || "A_templates";
-    return Folder(resolveFile(projectRoot, templatesRootPath).fsName);
+    return __autoRainbowCore.templateConfig.getTemplatesRootFolder(projectRoot, globalConfig);
 }
 
 function loadTemplateSpecById(templateId, projectRoot, globalConfig, cacheMap) {
-    if (cacheMap[templateId]) {
-        return cacheMap[templateId];
-    }
-
-    var templateCfg = null;
-
-    if (globalConfig && globalConfig.templates && globalConfig.templates[templateId]) {
-        templateCfg = globalConfig.templates[templateId];
-    } else {
-        var templatesRoot = getTemplatesRootFolder(projectRoot, globalConfig);
-        var templateFolder = Folder(templatesRoot.fsName + "/" + templateId);
-        var templateConfigFile = File(templateFolder.fsName + "/config.json");
-
-        if (!templateConfigFile.exists) {
-            throw new Error("未找到模板专属配置文件: " + templateConfigFile.fsName);
-        }
-
-        var raw = readJsonFile(templateConfigFile);
-        templateCfg = raw;
-        if (raw && raw.template && typeof raw.template === "object") {
-            templateCfg = raw.template;
-        }
-    }
-
-    var spec = validateTemplateConfig(templateId, templateCfg);
-    cacheMap[templateId] = spec;
-    return spec;
+    return __autoRainbowCore.templateConfig.loadTemplateSpecById(templateId, projectRoot, globalConfig, cacheMap);
 }
 
 function duplicateTemplatePage(doc, templateSpec) {
@@ -906,11 +472,14 @@ function fitImageLeftAlignedContent(frameObj) {
         }
 
         var frameBounds = frameObj.geometricBounds;
-        var graphicBounds = graphic.geometricBounds;
-        var gWidth = graphicBounds[3] - graphicBounds[1];
 
-        // 生日图规则：对齐图片内容（红框）左边到容器（蓝框）左边
-        graphic.geometricBounds = [graphicBounds[0], frameBounds[1], graphicBounds[2], frameBounds[1] + gWidth];
+        // 2026-08-16 用户要求：birthday_image 容器内图像布局 = x-8 y-8 w400 h400。
+        // 图片内容（红框）相对容器（蓝框）左上角偏移 (-8,-8)，固定尺寸 400×400。
+        var contentTop = frameBounds[0] - 8;
+        var contentLeft = frameBounds[1] - 8;
+        var contentBottom = contentTop + 400;
+        var contentRight = contentLeft + 400;
+        graphic.geometricBounds = [contentTop, contentLeft, contentBottom, contentRight];
     } catch (e1) {
     }
 }
@@ -995,74 +564,7 @@ function fitImageHeightMatched(frameObj) {
 }
 
 function fitImageTemplateDSecondPageAdaptive(frameObj) {
-    try {
-        if (!frameObj || !frameObj.isValid || !frameObj.allGraphics || frameObj.allGraphics.length === 0) {
-            return;
-        }
-        var graphic = frameObj.allGraphics[0];
-        if (!graphic || !graphic.isValid) {
-            return;
-        }
-
-        var frameBounds = frameObj.geometricBounds;
-        var frameTop = frameBounds[0];
-        var frameLeft = frameBounds[1];
-        var frameRight = frameBounds[3];
-        var frameWidth = frameRight - frameLeft;
-        if (frameWidth <= 0) {
-            return;
-        }
-
-        var gb = graphic.geometricBounds;
-        var gWidth = gb[3] - gb[1];
-        var gHeight = gb[2] - gb[0];
-        if (gWidth <= 0 || gHeight <= 0) {
-            return;
-        }
-
-        var ratio = gWidth / gHeight;
-
-        // 宽高比小于 2/3：沿用原有“高度匹配 + 左对齐”逻辑
-        if (ratio < (2 / 3)) {
-            fitImageHeightMatched(frameObj);
-            return;
-        }
-
-        // 其余情况：按容器宽度匹配，并让容器高度跟随图片高度
-        var scaleByWidth = frameWidth / gWidth;
-        if (Math.abs(scaleByWidth - 1) > 0.0001) {
-            var hScale = 100;
-            var vScale = 100;
-            try {
-                hScale = Number(graphic.horizontalScale);
-            } catch (e1) {
-            }
-            try {
-                vScale = Number(graphic.verticalScale);
-            } catch (e2) {
-            }
-            if (isNaN(hScale) || hScale <= 0) {
-                hScale = 100;
-            }
-            if (isNaN(vScale) || vScale <= 0) {
-                vScale = 100;
-            }
-            graphic.horizontalScale = hScale * scaleByWidth;
-            graphic.verticalScale = vScale * scaleByWidth;
-        }
-
-        gb = graphic.geometricBounds;
-        gHeight = gb[2] - gb[0];
-        if (gHeight <= 0) {
-            return;
-        }
-
-        // 图片宽度锁定为容器宽度，并顶部左侧对齐
-        graphic.geometricBounds = [frameTop, frameLeft, frameTop + gHeight, frameRight];
-        // 容器高度跟随图片高度
-        frameObj.geometricBounds = [frameTop, frameLeft, frameTop + gHeight, frameRight];
-    } catch (e3) {
-    }
+    return __autoRainbowCore.templateDLogic.fitImageTemplateDSecondPageAdaptive(frameObj);
 }
 
 function fitImageCoverCentered(frameObj) {
@@ -1304,14 +806,21 @@ function extractHeadingData(items) {
         var item = items[i];
 
         if (item.type === "text") {
+            // 2026-08-16：统一"行"模型——模板 A 只读首格内容（cols[0]）
+            var itemText = "";
+            if (item.cols && item.cols.length > 0) {
+                itemText = (item.cols[0] && item.cols[0].content) || "";
+            } else {
+                itemText = item.content || "";
+            }
             if (mainText === null) {
-                mainText = item.content || "";
+                mainText = itemText;
                 consumedTextIndexes[String(item.index)] = true;
                 continue;
             }
 
             if (subText === null) {
-                subText = item.content || "";
+                subText = itemText;
                 consumedTextIndexes[String(item.index)] = true;
                 continue;
             }
@@ -1369,6 +878,59 @@ function placeTextItem(state, textContent) {
     try {
         var gb = frame.geometricBounds;
         frame.geometricBounds = [gb[0], x1, gb[2], x2];
+    } catch (e4) {
+    }
+
+    return frame;
+}
+
+// 2026-08-16：一行多文本块——把文本放入指定列宽（列 x1..x2）。
+// 设计文档：private/docs/features/一行多文本块设计方案.md §5.1。
+// 必须放在 applyTextFramePrefSpec 之后覆盖列偏好（textColumnCount=1、useFixedColumnWidth=false），
+// 否则 7_周边 原型 useFixedColumnWidth=true 会把框宽拉回原型列宽。
+function placeTextItemInColumn(state, textContent, colX1, colX2) {
+    var spec = state.bodyTextSpec;
+
+    var frame = duplicatePrototypeToPage(state.bodyTextProtoRef, state.page);
+    if (!frame || !frame.isValid) {
+        frame = state.page.textFrames.add();
+        try {
+            if (spec.objectStyle && spec.objectStyle.isValid) {
+                frame.appliedObjectStyle = spec.objectStyle;
+            }
+        } catch (e1) {
+        }
+        applyTextFramePrefSpec(frame, spec.textFramePrefSpec);
+    }
+
+    frame.geometricBounds = [state.cursorY, colX1, state.cursorY + spec.baseHeight, colX2];
+
+    frame.contents = normalizeTextForInDesign(textContent);
+
+    try {
+        frame.parentStory.recompose();
+    } catch (e2) {
+    }
+
+    try {
+        applyTextFramePrefSpec(frame, spec.textFramePrefSpec);
+    } catch (e3) {
+    }
+
+    // 列偏好覆盖（在 apply 之后）：单列、非固定列宽
+    try {
+        var tfpCol = frame.textFramePreferences;
+        if (tfpCol) {
+            tfpCol.textColumnCount = 1;
+            tfpCol.useFixedColumnWidth = false;
+        }
+    } catch (ePref) {
+    }
+
+    // 最终锁列宽，防止样式造成宽度漂移
+    try {
+        var gbCol = frame.geometricBounds;
+        frame.geometricBounds = [gbCol[0], colX1, gbCol[2], colX2];
     } catch (e4) {
     }
 
@@ -1805,181 +1367,19 @@ function resolveBottomRange(templateSpec, page) {
 }
 
 function createPageStateTemplateB(doc, templateSpec) {
-    var page = duplicateTemplatePage(doc, templateSpec);
-    var bodyTextProto = findPageItemByLabel(page, templateSpec.body_text_proto_label);
-    var bodyImageProto = findPageItemByLabel(page, templateSpec.body_image_proto_label);
-    var cardProto = findPageItemByLabel(page, templateSpec.card_proto_label);
-    var columnSpace = findPageItemByLabel(page, templateSpec.column_space_label);
-
-    if (!bodyTextProto) {
-        throw new Error("templateB 缺少正文文本原型框: " + templateSpec.body_text_proto_label);
-    }
-    if (!bodyImageProto) {
-        throw new Error("templateB 缺少正文图片原型框: " + templateSpec.body_image_proto_label);
-    }
-    if (!cardProto) {
-        throw new Error("templateB 缺少装饰原型框: " + templateSpec.card_proto_label);
-    }
-
-    var range = resolveBottomRange(templateSpec, page);
-    var bodyStartY = bodyTextProto.geometricBounds[0];
-    if (columnSpace && columnSpace.isValid) {
-        bodyStartY = columnSpace.geometricBounds[2];
-    }
-
-    return {
-        page: page,
-        bodyTextProto: bodyTextProto,
-        bodyImageProto: bodyImageProto,
-        cardProto: cardProto,
-        bodyTextProtoRef: bodyTextProto,
-        bodyImageProtoRef: bodyImageProto,
-        cardProtoRef: cardProto,
-        bodyTextSpec: buildTextSpecFromProto(bodyTextProto),
-        bodyImageSpec: buildImageSpecFromProto(bodyImageProto),
-        cardSpec: buildBoxSpecFromProto(cardProto),
-        cursorY: bodyStartY,
-        lastPlacedBottom: null,
-        continuationStartY: toNumberOrDefault(templateSpec.continue_start_y, getPageInnerTop(page)),
-        pageMarginSpec: capturePageMarginSpec(page),
-        gapY: 0,
-        contentBottomSoft: range.softBottom,
-        contentBottomHard: range.hardBottom
-    };
+    return __autoRainbowCore.templateBLogic.createPageStateTemplateB(doc, templateSpec);
 }
 
 function buildModeBUnits(items) {
-    var units = [];
-    var pendingImages = [];
-    var pendingBreak = false;
-    var i;
-    for (i = 0; i < items.length; i += 1) {
-        var item = items[i];
-        if (item.page_break_before) {
-            pendingBreak = true;
-        }
-        if (item.type === "image") {
-            pendingImages.push({
-                index: item.index,
-                src: item.src || "",
-                pageBreakBefore: !!item.page_break_before
-            });
-            continue;
-        }
-        if (item.type === "text") {
-            var imageInfo = pendingImages.length > 0 ? pendingImages.shift() : null;
-            var imageSrc = imageInfo ? imageInfo.src : "";
-            units.push({
-                startIndex: imageInfo ? imageInfo.index : item.index,
-                textIndex: item.index,
-                text: item.content || "",
-                withImage: !!imageSrc,
-                imageSrc: imageSrc,
-                pageBreakBefore: pendingBreak || !!(imageInfo && imageInfo.pageBreakBefore)
-            });
-            pendingBreak = false;
-        }
-    }
-    return units;
+    return __autoRainbowCore.templateBLogic.buildModeBUnits(items);
 }
 
 function placeModeBImageItem(state, imagePath, logs) {
-    var spec = state.bodyImageSpec;
-    var frame = duplicatePrototypeToPage(state.bodyImageProtoRef, state.page);
-    if (!frame || !frame.isValid) {
-        throw new Error("复制图片原型失败");
-    }
-    frame.geometricBounds = [state.cursorY, spec.x1, state.cursorY + spec.height, spec.x2];
-    if (imagePath) {
-        var imgFile = File(imagePath);
-        if (imgFile.exists) {
-            clearFrameContents(frame);
-            frame.place(imgFile);
-            fitImageCoverCentered(frame);
-        } else {
-            pushLog(logs, "templateB 图片不存在，保留模板原图，路径=" + imagePath);
-        }
-    }
-    return frame;
+    return __autoRainbowCore.templateBLogic.placeModeBImageItem(state, imagePath, logs);
 }
 
 function processGroupTemplateB(doc, group, templateSpec, logs, pageBreakReport) {
-    var result = {
-        createdPageCount: 0,
-        placedTextCount: 0,
-        placedImageCount: 0,
-        firstPage: null
-    };
-
-    var baseState = createPageStateTemplateB(doc, templateSpec);
-    var state = baseState;
-    var units = buildModeBUnits(group.items);
-
-    result.createdPageCount += 1;
-    result.firstPage = state.page;
-
-    var i;
-    for (i = 0; i < units.length; i += 1) {
-        var unit = units[i];
-
-        if (unit.pageBreakBefore && i > 0) {
-            fitPageBottomToLastItem(state, logs, "templateB 手动分页前");
-            state = nextPageStateFromBase(doc, baseState, logs, group.doc_name);
-            result.createdPageCount += 1;
-        }
-
-        if (state.cursorY > getEffectiveBottomSoft(state)) {
-            recordAutoPageBreak(pageBreakReport, unit.startIndex, "templateB", group.doc_name, "soft");
-            fitPageBottomToLastItem(state, logs, "templateB soft换页前");
-            state = nextPageStateFromBase(doc, baseState, logs, group.doc_name);
-            result.createdPageCount += 1;
-        }
-
-        if (unit.withImage) {
-            if (state.cursorY + state.bodyImageSpec.height > getEffectiveBottomHard(state)) {
-                recordAutoPageBreak(pageBreakReport, unit.startIndex, "templateB", group.doc_name, "image hard");
-                fitPageBottomToLastItem(state, logs, "templateB image hard换页前");
-                state = nextPageStateFromBase(doc, baseState, logs, group.doc_name);
-                result.createdPageCount += 1;
-            }
-            var imgFrame = placeModeBImageItem(state, unit.imageSrc, logs);
-            var imgBottom = imgFrame.geometricBounds[2];
-            state.cursorY = imgBottom + state.gapY;
-            state.lastPlacedBottom = imgBottom;
-            result.placedImageCount += 1;
-        }
-
-        var textFrame = placeTextItem(state, unit.text);
-        var textBottom = textFrame.geometricBounds[2];
-        if (textBottom > getEffectiveBottomHard(state)) {
-            textFrame.remove();
-            recordAutoPageBreak(pageBreakReport, unit.startIndex, "templateB", group.doc_name, "text hard");
-            fitPageBottomToLastItem(state, logs, "templateB text hard换页前");
-            state = nextPageStateFromBase(doc, baseState, logs, group.doc_name);
-            result.createdPageCount += 1;
-            textFrame = placeTextItem(state, unit.text);
-            textBottom = textFrame.geometricBounds[2];
-        }
-        state.cursorY = textBottom + state.gapY;
-        state.lastPlacedBottom = textBottom;
-        result.placedTextCount += 1;
-
-        if (state.cursorY + state.cardSpec.height > getEffectiveBottomHard(state)) {
-            fitPageBottomToLastItem(state, logs, "templateB card hard换页前");
-            state = nextPageStateFromBase(doc, baseState, logs, group.doc_name);
-            result.createdPageCount += 1;
-        }
-        var cardFrame = placeFixedItemFromSpec(state, state.cardProtoRef, state.cardSpec);
-        var cardBottom = cardFrame.geometricBounds[2];
-        state.cursorY = cardBottom + state.gapY;
-        state.lastPlacedBottom = cardBottom;
-    }
-
-    fitPageBottomToLastItem(state, logs, "templateB 文档组结束");
-    cleanupOnePrototype(baseState.bodyTextProto, logs, "清理 templateB 文本原型失败");
-    cleanupOnePrototype(baseState.bodyImageProto, logs, "清理 templateB 图片原型失败");
-    cleanupOnePrototype(baseState.cardProto, logs, "清理 templateB 装饰原型失败");
-    return result;
+    return __autoRainbowCore.templateBLogic.processGroupTemplateB(doc, group, templateSpec, logs, pageBreakReport);
 }
 
 function createPageStateTemplateC(doc, templateSpec, headingData) {
@@ -2089,157 +1489,19 @@ function processGroupTemplateC(doc, group, templateSpec, logs) {
 }
 
 function splitTitleAndBodyText(textValue) {
-    var raw = String(textValue || "");
-    raw = raw.replace(/\r\n/g, "\n");
-    raw = raw.replace(/\r/g, "\n");
-    var lines = raw.split("\n");
-    var titleText = lines.length > 0 ? lines[0] : "";
-    var bodyText = lines.length > 1 ? lines.slice(1).join("\n") : "";
-    return {
-        titleText: titleText,
-        bodyText: bodyText
-    };
+    return __autoRainbowCore.templateDLogic.splitTitleAndBodyText(textValue);
 }
 
-function buildTemplateDTextGroups(items) {
-    var groups = [];
-    var current = null;
-    var i;
-    for (i = 0; i < items.length; i += 1) {
-        var item = items[i];
-        if (item.type === "text") {
-            var txt = item.content || "";
-            if (!current || item.page_break_before) {
-                current = {
-                    startIndex: item.index,
-                    manualBreak: !!item.page_break_before,
-                    textParts: [txt],
-                    imageItems: []
-                };
-                groups.push(current);
-            } else if (current.imageItems.length === 0) {
-                // 同一组中在首张图片前出现的连续文本，合并为一个文本块
-                current.textParts.push(txt);
-            } else {
-                // 当前组已进入图片区，新的文本意味着新组开始
-                current = {
-                    startIndex: item.index,
-                    manualBreak: false,
-                    textParts: [txt],
-                    imageItems: []
-                };
-                groups.push(current);
-            }
-            continue;
-        }
-        if (item.type === "image" && current) {
-            current.imageItems.push(item);
-        }
-    }
-
-    // 兼容旧调用结构：输出 textItem + imageItems
-    var normalized = [];
-    for (i = 0; i < groups.length; i += 1) {
-        var g = groups[i];
-        var mergedText = "";
-        if (g.textParts && g.textParts.length > 0) {
-            mergedText = g.textParts.join("\n");
-        }
-        normalized.push({
-            startIndex: g.startIndex,
-            manualBreak: !!g.manualBreak,
-            textItem: {
-                content: mergedText
-            },
-            imageItems: g.imageItems || []
-        });
-    }
-    return normalized;
+function buildTemplateDPages(items) {
+    return __autoRainbowCore.templateDLogic.buildTemplateDPages(items);
 }
 
 function buildPhotoRowPriorityOrder(rowCount) {
-    var order = [];
-    if (rowCount <= 0) {
-        return order;
-    }
-    if (rowCount === 1) {
-        return [0];
-    }
-    if (rowCount === 2) {
-        return [0, 1];
-    }
-
-    var step;
-    if (rowCount % 2 === 1) {
-        var mid = Math.floor(rowCount / 2);
-        order.push(mid);
-        step = 1;
-        while (order.length < rowCount) {
-            var top = mid - step;
-            var bottom = mid + step;
-            if (top >= 0) {
-                order.push(top);
-            }
-            if (bottom < rowCount) {
-                order.push(bottom);
-            }
-            step += 1;
-        }
-        return order;
-    }
-
-    var midLeft = rowCount / 2 - 1;
-    var midRight = rowCount / 2;
-    order.push(midLeft);
-    order.push(midRight);
-    step = 1;
-    while (order.length < rowCount) {
-        var topIdx = midLeft - step;
-        var bottomIdx = midRight + step;
-        if (topIdx >= 0) {
-            order.push(topIdx);
-        }
-        if (bottomIdx < rowCount) {
-            order.push(bottomIdx);
-        }
-        step += 1;
-    }
-    return order;
+    return __autoRainbowCore.templateDLogic.buildPhotoRowPriorityOrder(rowCount);
 }
 
 function buildPhotoRowCounts(totalCount) {
-    var n = Number(totalCount);
-    if (isNaN(n) || n <= 0) {
-        return [];
-    }
-    if (n <= 3) {
-        return [n];
-    }
-
-    var rowCount = Math.ceil(n / 3);
-    var counts = [];
-    var i;
-    for (i = 0; i < rowCount; i += 1) {
-        counts.push(2);
-    }
-
-    var remaining = n - rowCount * 2;
-    var order = buildPhotoRowPriorityOrder(rowCount);
-    while (remaining > 0) {
-        var changed = false;
-        for (i = 0; i < order.length && remaining > 0; i += 1) {
-            var idx = order[i];
-            if (counts[idx] < 3) {
-                counts[idx] += 1;
-                remaining -= 1;
-                changed = true;
-            }
-        }
-        if (!changed) {
-            break;
-        }
-    }
-    return counts;
+    return __autoRainbowCore.templateDLogic.buildPhotoRowCounts(totalCount);
 }
 
 function buildRowXBounds(imageCount, centerX, imageWidth) {
@@ -2265,459 +1527,32 @@ function buildRowXBounds(imageCount, centerX, imageWidth) {
 }
 
 function buildRowXBoundsLeftAligned(imageCount, leftX, imageWidth) {
-    var w = Number(imageWidth);
-    if (isNaN(w) || w <= 0) {
-        throw new Error("图片宽度无效: " + imageWidth);
-    }
-
-    if (imageCount <= 1) {
-        return [[leftX, leftX + w]];
-    }
-    if (imageCount === 2) {
-        return [
-            [leftX, leftX + w],
-            [leftX + w, leftX + 2 * w]
-        ];
-    }
-    return [
-        [leftX, leftX + w],
-        [leftX + w, leftX + 2 * w],
-        [leftX + 2 * w, leftX + 3 * w]
-    ];
+    return __autoRainbowCore.templateDLogic.buildRowXBoundsLeftAligned(imageCount, leftX, imageWidth);
 }
 
 function keepFrameTopGap(frame, targetTop) {
-    if (!frame || !frame.isValid) {
-        return;
-    }
-    var gb = frame.geometricBounds;
-    var h = gb[2] - gb[0];
-    frame.geometricBounds = [targetTop, gb[1], targetTop + h, gb[3]];
+    return __autoRainbowCore.templateDLogic.keepFrameTopGap(frame, targetTop);
 }
 
 function processGroupTemplateD(doc, group, templateSpec, logs, pageBreakReport) {
-    var result = {
-        createdPageCount: 0,
-        placedTextCount: 0,
-        placedImageCount: 0,
-        firstPage: null
-    };
-
-    var contentGroups = buildTemplateDTextGroups(group.items);
-    if (contentGroups.length === 0) {
-        pushLog(logs, "templateD 未找到可用文本组: " + group.doc_name);
-        return result;
-    }
-
-    var g;
-    for (g = 0; g < contentGroups.length; g += 1) {
-        var cg = contentGroups[g];
-        var isFirstGroup = g === 0;
-        if (!isFirstGroup && !cg.manualBreak) {
-            recordAutoPageBreak(pageBreakReport, cg.startIndex, "templateD", group.doc_name, "text group");
-        }
-        var splitText = splitTitleAndBodyText(cg.textItem.content || "");
-        var pageIndex = isFirstGroup ? templateSpec.first_group_source_page_index : templateSpec.other_group_source_page_index;
-        var sourcePage = doc.pages[Number(pageIndex) - 1];
-        var sourceLabels = collectPageLabels(sourcePage, 80).join(", ");
-        var page = duplicateTemplatePageByIndex(doc, pageIndex);
-        result.createdPageCount += 1;
-        if (!result.firstPage) {
-            result.firstPage = page;
-        }
-
-        var dividerLabel = isFirstGroup ? templateSpec.first_divider_label : templateSpec.other_divider_label;
-        var imageLabel = isFirstGroup ? templateSpec.first_image_proto_label : templateSpec.other_image_proto_label;
-        var textLabel = isFirstGroup ? templateSpec.first_text_proto_label : templateSpec.other_text_proto_label;
-
-        var dividerItem = findPageItemByLabels(page, buildDividerLabelCandidates(dividerLabel));
-        var imageProto = findPageItemByLabel(page, imageLabel);
-        var textProto = findPageItemByLabel(page, textLabel);
-        if (!dividerItem) {
-            throw new Error(
-                "templateD 缺少分隔线对象: " + dividerLabel +
-                "；组序号=" + (g + 1) +
-                "；源页索引=" + pageIndex +
-                "；源页label=" + sourceLabels +
-                "；复制页label=" + collectPageLabels(page, 80).join(", ")
-            );
-        }
-        if (!imageProto) {
-            throw new Error("templateD 缺少图片原型框: " + imageLabel);
-        }
-        if (!textProto) {
-            throw new Error("templateD 缺少文本原型框: " + textLabel);
-        }
-
-        if (!isFirstGroup) {
-            var headingItem = findPageItemByLabel(page, templateSpec.other_heading_label);
-            if (!headingItem) {
-                throw new Error("templateD 缺少标题对象: " + templateSpec.other_heading_label + "；本页可见label=" + collectPageLabels(page, 80).join(", "));
-            }
-            if (headingItem.isValid && headingItem.contents !== undefined) {
-                clearFrameContents(headingItem);
-                headingItem.contents = splitText.titleText || "";
-            }
-            var headingBottom = headingItem.geometricBounds[2];
-            var dividerBounds = dividerItem.geometricBounds;
-            var dividerHeight = dividerBounds[2] - dividerBounds[0];
-            var dividerTop = headingBottom + templateSpec.divider_offset_from_heading;
-            dividerItem.geometricBounds = [dividerTop, dividerBounds[1], dividerTop + dividerHeight, dividerBounds[3]];
-        }
-
-        var validImageFiles = [];
-        var ii;
-        for (ii = 0; ii < cg.imageItems.length; ii += 1) {
-            var imagePath = cg.imageItems[ii].src || "";
-            var imageFile = File(imagePath);
-            if (imageFile.exists) {
-                validImageFiles.push(imageFile.fsName);
-            } else {
-                pushLog(logs, "templateD 图片不存在，已跳过，路径=" + imagePath);
-            }
-        }
-
-        var dividerBottom = dividerItem.geometricBounds[2];
-        var imageSpec = buildImageSpecFromProto(imageProto);
-        var bodyText = splitText.bodyText;
-        var textStartY = dividerBottom + templateSpec.text_top_gap;
-
-        if (isFirstGroup) {
-            // 第1组保留原有生日图网格排版规则
-            var imageWidth = imageSpec.x2 - imageSpec.x1;
-            var photoStartY = dividerBottom + templateSpec.photo_top_gap;
-            var photoBottom = dividerBottom;
-
-            if (validImageFiles.length > 0) {
-                var rowCounts = buildPhotoRowCounts(validImageFiles.length);
-                var imageIndex = 0;
-                var rowIdx;
-                for (rowIdx = 0; rowIdx < rowCounts.length; rowIdx += 1) {
-                    var rowCount = rowCounts[rowIdx];
-                    var rowTop = photoStartY + rowIdx * (imageSpec.height + templateSpec.photo_row_gap);
-                    // 周边第1页生日图统一按图片原型左边界对齐
-                    var xBoundsList = buildRowXBoundsLeftAligned(rowCount, imageSpec.x1, imageWidth);
-                    var cellIdx;
-                    for (cellIdx = 0; cellIdx < rowCount; cellIdx += 1) {
-                        var frame = duplicatePrototypeToPage(imageProto, page);
-                        if (!frame || !frame.isValid) {
-                            throw new Error("templateD 复制图片原型失败");
-                        }
-                        var xBounds = xBoundsList[cellIdx];
-                        frame.geometricBounds = [rowTop, xBounds[0], rowTop + imageSpec.height, xBounds[1]];
-                        clearFrameContents(frame);
-                        frame.place(File(validImageFiles[imageIndex]));
-                        fitImageLeftAlignedContent(frame);
-                        imageIndex += 1;
-                        result.placedImageCount += 1;
-                    }
-                    photoBottom = rowTop + imageSpec.height;
-                }
-            }
-
-            textStartY = (validImageFiles.length > 0 ? photoBottom : dividerBottom) + templateSpec.text_top_gap;
-        } else {
-            // 第2组开始：图片按普通纵向排列，固定 gap=48
-            var normalGap = 48;
-            var cursorY = dividerBottom + normalGap;
-            var imgIdx;
-            for (imgIdx = 0; imgIdx < validImageFiles.length; imgIdx += 1) {
-                var lineFrame = duplicatePrototypeToPage(imageProto, page);
-                if (!lineFrame || !lineFrame.isValid) {
-                    throw new Error("templateD 复制图片原型失败");
-                }
-                lineFrame.geometricBounds = [cursorY, imageSpec.x1, cursorY + imageSpec.height, imageSpec.x2];
-                clearFrameContents(lineFrame);
-                lineFrame.place(File(validImageFiles[imgIdx]));
-                fitImageTemplateDSecondPageAdaptive(lineFrame);
-                cursorY = lineFrame.geometricBounds[2] + normalGap;
-                result.placedImageCount += 1;
-            }
-            textStartY = cursorY;
-        }
-
-        var textState = {
-            page: page,
-            cursorY: textStartY,
-            bodyTextProtoRef: textProto,
-            bodyTextSpec: buildTextSpecFromProto(textProto)
-        };
-        var textFrame = placeTextItem(textState, bodyText);
-        // 固定正文与上方元素间距，避免文本框因自动尺寸参考点造成贴底偏移
-        keepFrameTopGap(textFrame, textStartY);
-        var textBottom = textFrame.geometricBounds[2];
-        result.placedTextCount += 1;
-
-        fitPageBottomToLastItem({
-            page: page,
-            lastPlacedBottom: textBottom
-        }, logs, "templateD 文本组结束");
-
-        cleanupOnePrototype(imageProto, logs, "清理 templateD 图片原型失败");
-        cleanupOnePrototype(textProto, logs, "清理 templateD 文本原型失败");
-    }
-
-    return result;
+    return __autoRainbowCore.templateDLogic.processGroupTemplateD(doc, group, templateSpec, logs, pageBreakReport);
 }
 
 function main() {
-    var logs = [];
-    pushLog(logs, "开始执行 InDesign 自动排版");
-
-    var batchMode = isTruthyArg(getScriptArgValue("pipeline_batch_mode"));
-    var inputJsonArg = getScriptArgValue("pipeline_input_json");
-    var outputInddArg = getScriptArgValue("pipeline_output_indd");
-    var forcedTemplateIdArg = getScriptArgValue("pipeline_target_template_id");
-    var forcedLayoutModeArg = getScriptArgValue("pipeline_force_layout_mode");
-    var templateInddArg = getScriptArgValue("pipeline_template_indd");
-    var configPathArg = getScriptArgValue("pipeline_config_path");
-
-    if (app.documents.length === 0) {
-        if (batchMode && templateInddArg) {
-            var templateFile = File(templateInddArg);
-            if (!templateFile.exists) {
-                throw new Error("批处理模板文件不存在: " + templateInddArg);
-            }
-            app.open(templateFile, false);
-            pushLog(logs, "批处理自动打开模板文档: " + templateFile.fsName);
-        } else {
-            throw new Error("请先打开一个 InDesign 文档，再运行脚本");
-        }
-    }
-
-    if (app.documents.length === 0) {
-        throw new Error("未找到可用文档，无法继续执行");
-    }
-
-    var scriptFile = File($.fileName);
-    var baseFolder = scriptFile.parent;
-
-    var configFile;
-    if (configPathArg) {
-        configFile = File(configPathArg);
-        if (!configFile.exists) {
-            throw new Error("指定的配置文件不存在: " + configPathArg);
-        }
-    } else {
-        configFile = getConfigFile(baseFolder, app.activeDocument);
-    }
-    var config = readJsonFile(configFile);
-    var projectRootFolder = getProjectRootFromConfig(configFile);
-    var projectRoot = config.project_root ? Folder(config.project_root) : projectRootFolder;
-    if (!projectRoot || !projectRoot.exists) {
-        throw new Error("项目根目录无效: " + (projectRoot ? projectRoot.fsName : "null"));
-    }
-
-    var records;
-    var sourceInputJsonPath = "";
-    if (inputJsonArg) {
-        var inputJsonFile = File(inputJsonArg);
-        records = readJsonFile(inputJsonFile);
-        sourceInputJsonPath = inputJsonFile.fsName;
-        pushLog(logs, "读取单文档 JSON: " + inputJsonFile.fsName);
-    } else if (config.output_json) {
-        var outputJsonFile = resolveFile(projectRoot, config.output_json);
-        records = readJsonFile(outputJsonFile);
-        sourceInputJsonPath = outputJsonFile.fsName;
-        pushLog(logs, "读取汇总 JSON: " + outputJsonFile.fsName);
-    } else {
-        records = readRecordsFromWorkspace(projectRoot, config, logs);
-    }
-
-    if (!(records instanceof Array)) {
-        throw new Error("output.json 顶层必须是数组");
-    }
-
-    var groups = buildDocGroups(records);
-    var doc = app.activeDocument;
-    var originalSpreadIds = captureOriginalSpreadIds(doc);
-    var firstCreatedPage = null;
-    var placedTextCount = 0;
-    var placedImageCount = 0;
-    var createdPageCount = 0;
-    var skippedGroupCount = 0;
-    var templateSpecCache = {};
-    var pageBreakReport = createPageBreakReport(sourceInputJsonPath);
-
-    var g;
-    for (g = 0; g < groups.length; g += 1) {
-        var group = groups[g];
-        if (forcedTemplateIdArg && String(group.template_id) !== String(forcedTemplateIdArg)) {
-            skippedGroupCount += 1;
-            pushLog(logs, "跳过非目标 template_id 文档组: " + group.doc_name + "，模板=" + group.template_id + "，目标=" + forcedTemplateIdArg);
-            continue;
-        }
-        var templateSpec = loadTemplateSpecById(group.template_id, projectRoot, config, templateSpecCache);
-        var runtimeLayoutMode = forcedLayoutModeArg ? normalizeLayoutMode(forcedLayoutModeArg) : templateSpec.layout_mode;
-
-        pushLog(logs, "开始处理文档组: " + group.doc_name + "，模板=" + group.template_id + "，mode=" + runtimeLayoutMode);
-
-        if (runtimeLayoutMode === "templateB") {
-            var resultB = processGroupTemplateB(doc, group, templateSpec, logs, pageBreakReport);
-            createdPageCount += resultB.createdPageCount;
-            placedTextCount += resultB.placedTextCount;
-            placedImageCount += resultB.placedImageCount;
-            if (!firstCreatedPage && resultB.firstPage) {
-                firstCreatedPage = resultB.firstPage;
-            }
-            continue;
-        }
-
-        if (runtimeLayoutMode === "templateC") {
-            var resultC = processGroupTemplateC(doc, group, templateSpec, logs);
-            createdPageCount += resultC.createdPageCount;
-            placedTextCount += resultC.placedTextCount;
-            placedImageCount += resultC.placedImageCount;
-            if (!firstCreatedPage && resultC.firstPage) {
-                firstCreatedPage = resultC.firstPage;
-            }
-            continue;
-        }
-
-        if (runtimeLayoutMode === "templateD") {
-            var resultD = processGroupTemplateD(doc, group, templateSpec, logs, pageBreakReport);
-            createdPageCount += resultD.createdPageCount;
-            placedTextCount += resultD.placedTextCount;
-            placedImageCount += resultD.placedImageCount;
-            if (!firstCreatedPage && resultD.firstPage) {
-                firstCreatedPage = resultD.firstPage;
-            }
-            continue;
-        }
-
-        if (runtimeLayoutMode !== "templateA") {
-            skippedGroupCount += 1;
-            pushLog(logs, "跳过未知 layout_mode 文档组: " + group.doc_name + "，模板=" + group.template_id + "，layout_mode=" + runtimeLayoutMode);
-            continue;
-        }
-        var headingData = extractHeadingData(group.items);
-
-        var baseState = createPageState(doc, templateSpec, headingData, logs);
-        var state = baseState;
-        createdPageCount += 1;
-        if (!firstCreatedPage) {
-            firstCreatedPage = state.page;
-        }
-
-        var i;
-        for (i = 0; i < group.items.length; i += 1) {
-            var item = group.items[i];
-            var itemIndexKey = String(item.index);
-
-            // 第一个与第二个文本用于主副标题，不再进入正文
-            if (item.type === "text" && headingData.consumedTextIndexes[itemIndexKey]) {
-                continue;
-            }
-
-            // soft 区间规则：当前项不回退，下一项开始前再换页
-            if (item.page_break_before && state.lastPlacedBottom !== null && state.lastPlacedBottom !== undefined) {
-                fitPageBottomToLastItem(state, logs, "手动分页前");
-                state = nextPageState(doc, baseState, logs, group.doc_name);
-                createdPageCount += 1;
-            }
-
-            // soft 区间规则：当前项不回退，下一项开始前再换页
-            if (state.cursorY > getEffectiveBottomSoft(state)) {
-                recordAutoPageBreak(pageBreakReport, item.index, "templateA", group.doc_name, "soft");
-                fitPageBottomToLastItem(state, logs, "soft换页前");
-                state = nextPageState(doc, baseState, logs, group.doc_name);
-                createdPageCount += 1;
-            }
-
-            if (item.type === "text") {
-                var textFrame = placeTextItem(state, item.content || "");
-                var textBottom = textFrame.geometricBounds[2];
-
-                if (textBottom > getEffectiveBottomHard(state)) {
-                    textFrame.remove();
-                    recordAutoPageBreak(pageBreakReport, item.index, "templateA", group.doc_name, "text hard");
-                    fitPageBottomToLastItem(state, logs, "text hard换页前");
-                    state = nextPageState(doc, baseState, logs, group.doc_name);
-                    createdPageCount += 1;
-                    textFrame = placeTextItem(state, item.content || "");
-                    textBottom = textFrame.geometricBounds[2];
-
-                    if (textBottom > getEffectiveBottomHard(state)) {
-                        pushLog(logs, "文本超出 hard 边界，已保留当前结果，index=" + item.index);
-                    }
-                }
-
-                state.cursorY = textBottom + state.gapY;
-                state.lastPlacedBottom = textBottom;
-                placedTextCount += 1;
-            } else if (item.type === "image") {
-                var imageFile = File(item.src || "");
-                if (!imageFile.exists) {
-                    pushLog(logs, "图片不存在，已跳过，index=" + item.index + "，路径=" + (item.src || ""));
-                    continue;
-                }
-
-                var imageHeight = state.bodyImageSpec.height;
-
-                if (state.cursorY + imageHeight > getEffectiveBottomHard(state)) {
-                    recordAutoPageBreak(pageBreakReport, item.index, "templateA", group.doc_name, "image hard");
-                    fitPageBottomToLastItem(state, logs, "image hard换页前");
-                    state = nextPageState(doc, baseState, logs, group.doc_name);
-                    createdPageCount += 1;
-                }
-
-                var imageFrame = placeImageItem(state, imageFile.fsName);
-                var imageBottom = imageFrame.geometricBounds[2];
-                state.cursorY = imageBottom + state.gapY;
-                state.lastPlacedBottom = imageBottom;
-                placedImageCount += 1;
-            } else {
-                pushLog(logs, "未知元素类型，已跳过，index=" + item.index + "，type=" + item.type);
-            }
-        }
-
-        fitPageBottomToLastItem(state, logs, "文档组结束");
-        cleanupPrototypeItems(baseState, logs);
-    }
-
-    var logPath = config.log_file || "indesign_layout.log";
-    var logFile = resolveFile(projectRoot, logPath);
-    writePageBreakReport(projectRoot, sourceInputJsonPath, pageBreakReport, logs);
-    pushLog(logs, "执行完成");
-    writeLogFile(logFile, logs);
-
-    if (batchMode && outputInddArg) {
-        if (createdPageCount > 0) {
-            removeOriginalTemplateSpreads(doc, originalSpreadIds, logs);
-        }
-        var outputFile = File(outputInddArg);
-        if (!ensureFolderExists(outputFile.parent)) {
-            throw new Error("输出目录创建失败: " + outputFile.parent.fsName);
-        }
-
-        closeOpenDocumentByPath(outputFile, doc, logs);
-        doc.save(outputFile);
-        pushLog(logs, "已输出 INDD: " + outputFile.fsName);
-        writeLogFile(logFile, logs);
-
-        try {
-            doc.close(SaveOptions.NO);
-        } catch (eClose) {
-        }
-        return;
-    }
-
-    try {
-        if (firstCreatedPage && app.layoutWindows.length > 0) {
-            app.layoutWindows[0].activePage = firstCreatedPage;
-        }
-    } catch (e1) {
-    }
-
-    alert("templateA 排版完成\r新增页面: " + createdPageCount + "\r正文文本: " + placedTextCount + "\r正文图片: " + placedImageCount + "\r跳过文档组: " + skippedGroupCount + "\r日志: " + logFile.fsName);
+    return __autoRainbowCore.layoutRunner.runMain("templateA");
 }
 
-try {
-    main();
-} catch (err) {
-    var isBatch = isTruthyArg(getScriptArgValue("pipeline_batch_mode"));
-    if (isBatch) {
-        throw err;
+__autoRainbowCore.templateAEntry = __autoRainbowCore.templateAEntry || {};
+__autoRainbowCore.templateAEntry.main = main;
+
+if (!$.global.__AUTORAINBOW_SUPPRESS_AUTO_MAIN__) {
+    try {
+        main();
+    } catch (err) {
+        var isBatch = isTruthyArg(getScriptArgValue("pipeline_batch_mode"));
+        if (isBatch) {
+            throw err;
+        }
+        alert("脚本执行失败: " + err);
     }
-    alert("脚本执行失败: " + err);
 }

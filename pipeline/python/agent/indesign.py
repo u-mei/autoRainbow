@@ -2,7 +2,7 @@ import os, sys, json
 from pathlib import Path
 from typing import Optional
 
-from .config import read_config
+from .config import read_config, auto_detect_indesign, resolve_dir
 from .platform_adapter import create_adapter
 
 
@@ -11,7 +11,13 @@ adapter = create_adapter()
 
 def try_open_indesign():
     cfg = read_config()
-    adapter.open_app(cfg["indesign_app_path"])
+    app_path = cfg["indesign_app_path"]
+    if not app_path:
+        detected = auto_detect_indesign()
+        app_path = (detected or {}).get("path") or ""
+    if not app_path:
+        return
+    adapter.open_app(app_path)
 
 
 def execute_jsx(script_path: str) -> str:
@@ -55,8 +61,32 @@ def install_watcher() -> dict:
             except OSError:
                 pass
 
+    # 2026-08-18：watcher 副本安装时注入 project_root（不读家目录配置），
+    # 使 Startup 副本自带项目根定位能力，迁移目录后重装一次即可。
     import shutil
-    shutil.copy2(str(watcher_src), str(target))
+    import json as _json
+    source_text = watcher_src.read_text(encoding="utf-8")
+    inject_line = (
+        "// [autoInstall] project_root injected by install_watcher (2026-08-18)\n"
+        "var __AUTO_INJECTED_PROJECT_ROOT__ = "
+        + _json.dumps(cfg["project_root"]) + ";\n"
+        "var __AUTO_INJECTED_PATHS_JSON__ = "
+        + _json.dumps(str(Path(cfg["project_root"]) / "workspace/.runtime/paths.json")) + ";\n"
+    )
+    if "__AUTO_INJECTED_PROJECT_ROOT__" in source_text:
+        # 残留旧注入（重复安装），先剥离旧注入行
+        lines = []
+        skip_next = False
+        for line in source_text.split("\n"):
+            if skip_next:
+                skip_next = False
+                continue
+            if "var __AUTO_INJECTED_PROJECT_ROOT__" in line or "var __AUTO_INJECTED_PATHS_JSON__" in line:
+                continue
+            lines.append(line)
+        source_text = "\n".join(lines)
+    new_text = inject_line + source_text
+    target.write_text(new_text, encoding="utf-8")
 
     msg = f"已安装到: {target}"
     if disabled_count > 0:
@@ -91,8 +121,7 @@ def check_watcher_installed() -> dict:
 
 def check_watcher_alive() -> dict:
     cfg = read_config()
-    project_root = cfg["project_root"]
-    heartbeat = Path(project_root) / "workspace/B_outputs/queue/.watcher_heartbeat"
+    heartbeat = resolve_dir(cfg, "queue_dir", "workspace/.runtime/queue") / ".watcher_heartbeat"
 
     if not heartbeat.exists():
         return {"alive": False, "last_heartbeat": None}

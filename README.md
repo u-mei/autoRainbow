@@ -20,7 +20,8 @@ License 1.1.
 This repository intentionally does not store:
 
 - `.indd` InDesign templates or generated `.indd` output files
-- local/private reference files under `模板/`
+- internal/private content under `private/` (internal docs, build scripts,
+  release tooling) and per-template `style_profile.json` data
 - local/private font binaries other than the bundled open-source SweiGothicCJKsc
   files
 - local input/output queues, logs, caches, template parser caches, and generated
@@ -67,11 +68,13 @@ contain small template metadata files used by tests or development, but InDesign
 template binaries, template parser caches, outputs, queues, logs, and user inputs
 are ignored by Git.
 
-Before publishing or pushing changes, run:
+Internal/private files (`private/`, template profiles) are tracked in the
+development repository (`main`/`dev`) but excluded from the public release by
+`private/release_to_public.py` (internal-only, not published). Before publishing,
+generate a snapshot to a scratch branch and verify nothing private is included:
 
 ```bash
-git status --short
-git ls-files | rg '\\.(indd|log)$|^模板/|^workspace/B_outputs/|^workspace/C_inputs/|\\.FillReplaceHolder\\.jpg$|_objects\\.json$'
+python3 private/release_to_public.py --src main --target release-check
+git ls-tree -r --name-only release-check | rg 'private/|\.indd$|style_profile'
+# 应无输出（或仅公开工具文件名）；确认后删除该临时分支
 ```
-
-The second command should not list files intended for public distribution.

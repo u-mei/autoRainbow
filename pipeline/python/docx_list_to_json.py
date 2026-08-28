@@ -65,7 +65,7 @@ def load_export_config(config_path):
 def discover_template_config_map(templates_root_dir, known_ids=None):
     """
     扫描模板目录，返回:
-        {template_id: /abs/path/to/A_templates/<template_id>/config.json}
+        {template_id: /abs/path/to/templates/<template_id>/config.json}
     如果 known_ids 提供（来自合并配置的 templates 字段），优先使用这些 ID，
     否则扫描文件系统。
     """
@@ -136,16 +136,16 @@ def build_doc_output_dir(base_output_dir, section_name, doc_name):
     return os.path.abspath(os.path.join(base_output_dir, section_part, doc_stem))
 
 
-def build_cache_output_path(doc_workspace_root_dir, section_name, doc_name):
+def build_cache_output_path(work_root_dir, section_name, doc_name):
     """
-    构建缓存输出路径:
-    <doc_workspace_root_dir>/_cache/<section>_<doc_stem>_<base36>.json
+    构建缓存输出路径（2026-08-16 新结构）:
+    <work_root_dir>/caches/<section>_<doc_stem>_<base36>.json
     """
     section_part = sanitize_filename_component(section_name) or "unknown_section"
     doc_stem = sanitize_filename_component(Path(doc_name).stem) or "unknown_doc"
     base36 = short_timestamp()
     filename = f"{section_part}_{doc_stem}_{base36}.json"
-    cache_dir = os.path.join(doc_workspace_root_dir, "_cache")
+    cache_dir = os.path.join(work_root_dir, "caches")
     return resolve_unique_path(cache_dir, filename), base36
 
 
@@ -193,15 +193,13 @@ def discover_input_sources(input_root_dir, section_image_mode=SECTION_IMAGE_MODE
 
     sources = []
 
-    # 读取 Word 文档（递归，跳过 _inbox）
+    # 读取 Word 文档（inputs 即暂存区，直接扫描顶层文件；子目录不再按板块划分）
     for p in sorted(input_root.rglob("*")):
         if not p.is_file():
             continue
         if is_word_temp_file(p):
             continue
         if p.suffix.lower() not in WORD_EXTENSIONS:
-            continue
-        if "_inbox" in p.parts:
             continue
         sources.append({
             "kind": "word",
@@ -258,9 +256,16 @@ def export_docx_images(docx_path, output_dir, name_prefix=None):
             filename = os.path.basename(media_file)
             _, ext = os.path.splitext(filename)
 
+            # 2026-08-15：InDesign 的 place() 只按 .jpg 扩展名识别 JPEG，
+            # .jpeg 会报 "Unable to read JPEG"。统一规范化为 .jpg（内容不变）。
+            if ext.lower() == ".jpeg":
+                ext = ".jpg"
+
             if name_prefix:
                 prefix = sanitize_filename_component(name_prefix)
                 filename = f"{prefix}_{idx:03d}{ext}"
+            else:
+                filename = f"{os.path.splitext(filename)[0]}{ext}"
 
             save_path = resolve_unique_path(output_dir, filename)
 
@@ -407,6 +412,25 @@ def paragraph_to_elements(paragraph, rel_id_to_media_path, split_soft_breaks, in
     return result, index_counter
 
 
+def normalize_text_cols(elements):
+    """2026-08-16：统一"行"模型——每个文本元素带 cols（1~3 格）。
+
+    设计文档：private/docs/features/一行多文本块设计方案.md §2。
+    - type==text 且无 cols → 补 cols=[{content}]（1 格 = 默认/现状等价）
+    - 已有 cols 且 1 格 → 同步 content（向后兼容旧消费者）
+    - 行（多格）由编辑器通过拖拽产生，解析只产出 1 格行
+    """
+    for item in elements:
+        if not isinstance(item, dict) or item.get("type") != "text":
+            continue
+        cols = item.get("cols")
+        if not isinstance(cols, list) or len(cols) == 0:
+            item["cols"] = [{"content": item.get("content") or ""}]
+        elif len(cols) == 1:
+            item["content"] = (cols[0] or {}).get("content") or ""
+    return elements
+
+
 def append_common_metadata(
     elements,
     doc_name,
@@ -530,7 +554,6 @@ def apply_text_rules_for_doc(elements, template_id, section_name, rule_state=Non
     if not elements:
         return []
 
-    apply_merchandise_rule = is_merchandise_doc(template_id, section_name)
     apply_costume_rule = is_new_costume_doc(template_id, section_name)
 
     if rule_state is None:
@@ -548,9 +571,6 @@ def apply_text_rules_for_doc(elements, template_id, section_name, rule_state=Non
 
         content = str(item.get("content") or "")
 
-        if apply_merchandise_rule:
-            content = normalize_newline_before_marker(content, marker="■")
-
         if apply_costume_rule:
             content, hit_keyword = truncate_from_keyword_for_costume(content, keyword="相关视频")
             if hit_keyword:
@@ -565,6 +585,91 @@ def apply_text_rules_for_doc(elements, template_id, section_name, rule_state=Non
 
     rule_state["stop_following_text"] = stop_following_text
     return normalized
+
+
+def newline_after_block_label_colon(text):
+    """
+    周边正文特殊规则（2026-08-16 用户要求，替代 add_blank_line_before_blocks_from_second）：
+
+    对以 ■ 开头的行：若该行内出现中文冒号（：）且冒号后面还有文本，
+    则在冒号后插入一个换行，把"标题：内容"拆成两行。
+    例：'■贩售日期：7月29日 –' → '■贩售日期：\n7月29日 –'
+    只处理"■ 开头 + 冒号 + 冒号后有内容"的行；冒号后无文本（如 '■商品详情：'）不动。
+    """
+    if not text:
+        return text
+
+    lines = text.split("\n")
+    out = []
+    for line in lines:
+        if line.startswith("■") and "：" in line:
+            head, sep, tail = line.partition("：")
+            if sep and tail.strip():
+                line = head + sep + "\n" + tail
+        out.append(line)
+    return "\n".join(out)
+
+
+def merge_merchandise_text_blocks(elements):
+    """
+    周边文本特殊规则（2026-08-15 用户要求）：
+
+    把文本整理成"标题 + 正文"结构：
+    - 全文第一个文本块 / 连续图片末尾后的第一个文本块 → 单独保留（作为标题）
+    - 其后直到下一个图片（或文末）之前的所有文本 → 合并为一个文本块（保留换行）
+
+    返回重新编号后的新元素列表（index 1-based 连续，
+    前端 applyConfigV2PageBreakIndexes 依赖 index-1 == 数组下标）。
+    """
+    if not elements:
+        return elements
+
+    result = []
+    pending = []  # 待合并文本块（合并为正文）
+
+    def is_anchor(idx):
+        el = elements[idx]
+        if el.get("type") != "text":
+            return False
+        if idx == 0:
+            return True  # 全文第一个文本块
+        return elements[idx - 1].get("type") == "image"  # 连续图片末尾后的第一个
+
+    def flush_pending():
+        nonlocal pending
+        if not pending:
+            return
+        base = dict(pending[0])
+        merged = "\n".join(str(e.get("content") or "") for e in pending)
+        # 2026-08-16：正文块内 "■标题：内容" 拆成两行（冒号后插换行）
+        base["content"] = newline_after_block_label_colon(merged)
+        result.append(base)
+        pending = []
+
+    i = 0
+    n = len(elements)
+    while i < n:
+        el = elements[i]
+        if el.get("type") == "image":
+            flush_pending()
+            result.append(el)
+            i += 1
+            continue
+        # text
+        if is_anchor(i):
+            flush_pending()
+            result.append(el)
+            i += 1
+            continue
+        # 非锚点文本 → 合并缓冲
+        pending.append(el)
+        i += 1
+
+    flush_pending()
+
+    for k, el in enumerate(result):
+        el["index"] = k + 1
+    return result
 
 
 def docx_list_to_json(
@@ -654,13 +759,13 @@ def docx_list_to_json(
         doc_base36_id = None
         if doc_workspace_root_dir:
             doc_output_json_path, doc_base36_id = build_cache_output_path(
-                doc_workspace_root_dir=doc_workspace_root_dir,
+                work_root_dir=doc_workspace_root_dir,
                 section_name=section_name,
                 doc_name=doc_name
             )
             os.makedirs(os.path.dirname(doc_output_json_path), exist_ok=True)
             doc_stem_clean = sanitize_filename_component(doc_stem) or "unknown"
-            image_output_dir = os.path.join(doc_workspace_root_dir, "_shared_images", f"{section_name}_{doc_stem_clean}")
+            image_output_dir = os.path.join(doc_workspace_root_dir, "images", f"{section_name}_{doc_stem_clean}")
             os.makedirs(image_output_dir, exist_ok=True)
         else:
             image_output_dir = image_root_dir
@@ -708,12 +813,18 @@ def docx_list_to_json(
                             image_output_dir=image_output_dir,
                             base36_id=doc_base36_id
                         )
-                        all_elements.extend(elements)
                         doc_elements.extend(elements)
 
                     # 表格暂时跳过；如果你需要，我可以再补表格处理
                     elif block.tag.endswith("}tbl"):
                         continue
+
+                # 2026-08-15：周边文本特殊规则——"标题 + 正文"结构：
+                # 图片段末尾后的第一个文本块 / 全文第一个文本块单独保留，
+                # 其后到下一个图片（或文末）之前的所有文本合并为一个文本块（保留换行）。
+                if is_merchandise_doc(template_id, section_name):
+                    doc_elements = merge_merchandise_text_blocks(doc_elements)
+                all_elements.extend(doc_elements)
             except Exception as exc:
                 print(f"跳过文档：{source_path}；原因：{exc}")
 
@@ -742,6 +853,7 @@ def docx_list_to_json(
 
         # 每篇文档输出缓存 JSON（任务系统用，已含 base36 防重名）
         if doc_output_json_path:
+            normalize_text_cols(doc_elements)
             with open(doc_output_json_path, "w", encoding="utf-8") as f:
                 json.dump(doc_elements, f, ensure_ascii=False, indent=2)
             print(os.path.abspath(doc_output_json_path))
@@ -750,16 +862,19 @@ def docx_list_to_json(
 
 
 if __name__ == "__main__":
-    script_dir = Path(__file__).resolve().parent
+    # 2026-08-18：反推项目根不清软链（abspath 而非 resolve），
+    # 保证测试软链隔离场景（脚本软链到 tmp）下项目根仍指向 tmp。
+    script_dir = Path(os.path.abspath(__file__)).parent
     project_root = script_dir.parent.parent
+    # 2026-08-18 配置结构重构：业务配置只读项目内
+    # workspace/.runtime/autorainbow_config.json（路径索引在
+    # workspace/.runtime/paths.json，由 agent/config.py 统一管理），
+    # 不再读取家目录旧配置。
     config_candidates = [
-        Path.home() / "autorainbow_config.json",
-        Path.home() / ".autorainbow" / "config.json",
-        project_root / "workspace" / "A_templates" / "config.json",
+        project_root / "workspace" / ".runtime" / "autorainbow_config.json",
+        project_root / "workspace" / "templates" / "config.json",
         project_root / "workspace" / "config.json",
-        script_dir / "D" / "A_templates" / "config.json",
-        script_dir / "D" / "config.json",
-        script_dir / "A_templates" / "config.json",
+        script_dir / "templates" / "config.json",
         script_dir / "config.json"
     ]
 
@@ -777,22 +892,35 @@ if __name__ == "__main__":
     export_config = load_export_config(str(config_path))
     config_parent = config_path.parent
 
-    # 合并配置有 project_root 字段，优先使用
-    project_root_dir = Path(export_config.get("project_root", "")) if export_config.get("project_root") else None
-    if not project_root_dir or not project_root_dir.exists():
-        if config_parent.name == "A_templates":
-            project_root_dir = config_parent.parent
-        else:
-            project_root_dir = config_parent
+    # 2026-08-18：路径键（work_dir/templates_dir/inputs_dir 等）统一在
+    # paths.json（workspace/.runtime/paths.json）管理，业务配置不含路径。
+    # 合并 paths.json 的 dirs 平铺进 export_config，保持旧的平铺访问兼容。
+    paths_file = config_parent / "paths.json"
+    if paths_file.exists():
+        try:
+            with open(paths_file, "r", encoding="utf-8") as f:
+                paths_data = json.load(f)
+            for k, v in (paths_data.get("dirs") or {}).items():
+                export_config.setdefault(k, v)
+            if paths_data.get("project_root"):
+                export_config.setdefault("project_root", paths_data["project_root"])
+        except Exception:
+            pass
 
-    doc_workspace_cfg = export_config.get("doc_workspace_dir")
+    # 项目根以脚本位置反推为准（pipeline/python/docx_list_to_json.py → 上2级），
+    # 配置中的 project_root 字段仅作优先候选（存在且有效时采用）。
+    project_root_dir = Path(export_config["project_root"]) if export_config.get("project_root") and Path(export_config["project_root"]).exists() else None
+    if not project_root_dir:
+        project_root_dir = project_root
+
+    doc_workspace_cfg = export_config.get("work_dir", export_config.get("doc_workspace_dir"))
     doc_workspace_dir = None
     if doc_workspace_cfg:
         doc_workspace_dir = Path(doc_workspace_cfg)
         if not doc_workspace_dir.is_absolute():
             doc_workspace_dir = (project_root_dir / doc_workspace_dir).resolve()
 
-    templates_root_cfg = export_config.get("templates_root_dir", "A_templates")
+    templates_root_cfg = export_config.get("templates_dir", export_config.get("templates_root_dir", "templates"))
     templates_root_dir = Path(templates_root_cfg)
     if not templates_root_dir.is_absolute():
         templates_root_dir = (project_root_dir / templates_root_dir).resolve()

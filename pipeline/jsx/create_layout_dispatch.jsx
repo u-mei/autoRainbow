@@ -11,13 +11,199 @@
             }
         } catch (e1) {
         }
-
         try {
-            return eval("(" + raw + ")");
+            return parseES3Json(raw);
         } catch (e2) {
             var preview = raw.slice(0, 180).replace(/\r/g, "\\r").replace(/\n/g, "\\n");
             throw new Error("JSON解析失败: " + sourceLabel + "；错误=" + e2 + "；片段=" + preview);
         }
+    }
+
+    function parseES3Json(text) {
+        if (typeof JSON !== "undefined" && JSON.parse) {
+            return JSON.parse(text);
+        }
+        var src = String(text || "");
+        if (src.charCodeAt(0) === 0xFEFF) {
+            src = src.slice(1);
+        }
+        var pos = 0;
+        function skipWs() {
+            while (pos < src.length) {
+                var c = src.charAt(pos);
+                if (c === " " || c === "\t" || c === "\r" || c === "\n") {
+                    pos += 1;
+                } else {
+                    break;
+                }
+            }
+        }
+        function fail(msg) {
+            throw new Error("JSON 解析失败: " + msg + " (位置 " + pos + ")");
+        }
+        function parseString() {
+            if (src.charAt(pos) !== "\"") {
+                fail("期望字符串");
+            }
+            pos += 1;
+            var out = "";
+            while (pos < src.length) {
+                var ch = src.charAt(pos);
+                if (ch === "\"") {
+                    pos += 1;
+                    return out;
+                }
+                if (ch === "\\") {
+                    pos += 1;
+                    var esc = src.charAt(pos);
+                    if (esc === "u") {
+                        var hex = src.substr(pos + 1, 4);
+                        out += String.fromCharCode(parseInt(hex, 16));
+                        pos += 5;
+                    } else if (esc === "n") {
+                        out += "\n";
+                        pos += 1;
+                    } else if (esc === "t") {
+                        out += "\t";
+                        pos += 1;
+                    } else if (esc === "r") {
+                        out += "\r";
+                        pos += 1;
+                    } else if (esc === "b") {
+                        out += "\b";
+                        pos += 1;
+                    } else if (esc === "f") {
+                        out += "\f";
+                        pos += 1;
+                    } else if (esc === "/") {
+                        out += "/";
+                        pos += 1;
+                    } else if (esc === "\\") {
+                        out += "\\";
+                        pos += 1;
+                    } else if (esc === "\"") {
+                        out += "\"";
+                        pos += 1;
+                    } else {
+                        fail("未知转义 \\" + esc);
+                    }
+                } else {
+                    out += ch;
+                    pos += 1;
+                }
+            }
+            fail("字符串未闭合");
+        }
+        function parseNumber() {
+            var start = pos;
+            if (src.charAt(pos) === "-") {
+                pos += 1;
+            }
+            while (pos < src.length && "0123456789.eE+-".indexOf(src.charAt(pos)) >= 0) {
+                pos += 1;
+            }
+            var numText = src.substring(start, pos);
+            var num = Number(numText);
+            if (isNaN(num)) {
+                fail("非法数字: " + numText);
+            }
+            return num;
+        }
+        function parseLiteral(word, value) {
+            if (src.substr(pos, word.length) !== word) {
+                fail("非法字面量: " + word);
+            }
+            pos += word.length;
+            return value;
+        }
+        function parseArray() {
+            pos += 1;
+            var arr = [];
+            skipWs();
+            if (src.charAt(pos) === "]") {
+                pos += 1;
+                return arr;
+            }
+            for (;;) {
+                arr.push(parseValue());
+                skipWs();
+                var c = src.charAt(pos);
+                if (c === ",") {
+                    pos += 1;
+                    continue;
+                }
+                if (c === "]") {
+                    pos += 1;
+                    return arr;
+                }
+                fail("数组期望 , 或 ]");
+            }
+        }
+        function parseObject() {
+            pos += 1;
+            var obj = {};
+            skipWs();
+            if (src.charAt(pos) === "}") {
+                pos += 1;
+                return obj;
+            }
+            for (;;) {
+                skipWs();
+                if (src.charAt(pos) !== "\"") {
+                    fail("对象键必须是字符串");
+                }
+                var key = parseString();
+                skipWs();
+                if (src.charAt(pos) !== ":") {
+                    fail("对象期望 :");
+                }
+                pos += 1;
+                obj[key] = parseValue();
+                skipWs();
+                var c = src.charAt(pos);
+                if (c === ",") {
+                    pos += 1;
+                    continue;
+                }
+                if (c === "}") {
+                    pos += 1;
+                    return obj;
+                }
+                fail("对象期望 , 或 }");
+            }
+        }
+        function parseValue() {
+            skipWs();
+            var c = src.charAt(pos);
+            if (c === "{") {
+                return parseObject();
+            }
+            if (c === "[") {
+                return parseArray();
+            }
+            if (c === "\"") {
+                return parseString();
+            }
+            if (c === "t") {
+                return parseLiteral("true", true);
+            }
+            if (c === "f") {
+                return parseLiteral("false", false);
+            }
+            if (c === "n") {
+                return parseLiteral("null", null);
+            }
+            if (c === "-" || (c >= "0" && c <= "9")) {
+                return parseNumber();
+            }
+            fail("非法值: " + c);
+        }
+        var result = parseValue();
+        skipWs();
+        if (pos < src.length) {
+            fail("尾部多余内容");
+        }
+        return result;
     }
 
     function stringifyJsonText(obj, pretty) {
@@ -255,49 +441,56 @@
         }
     }
 
+    function resolveDispatchProjectRoot() {
+        // 2026-08-18：不再读家目录配置。优先级：
+        // 1) watcher 设置的全局常量（副本自带项目根，见 install_watcher 注入）
+        // 2) 安装注入常量（直接复制副本运行时）
+        // 3) 脚本位置反推：pipeline/jsx/create_layout_dispatch.jsx → 上溯3级
+        if (typeof $.global.__AUTO_RAINBOW_PROJECT_ROOT__ === "string" && $.global.__AUTO_RAINBOW_PROJECT_ROOT__) {
+            var gRoot = Folder($.global.__AUTO_RAINBOW_PROJECT_ROOT__);
+            if (gRoot.exists && Folder(gRoot.fsName + "/workspace").exists) {
+                return gRoot.fsName;
+            }
+        }
+        if (typeof __AUTO_INJECTED_PROJECT_ROOT__ === "string" && __AUTO_INJECTED_PROJECT_ROOT__) {
+            var iRoot = Folder(__AUTO_INJECTED_PROJECT_ROOT__);
+            if (iRoot.exists && Folder(iRoot.fsName + "/workspace").exists) {
+                return iRoot.fsName;
+            }
+        }
+        try {
+            var scriptFile = File($.fileName);
+            var scriptDir = scriptFile.parent;         // pipeline/jsx
+            if (scriptDir && scriptDir.parent && scriptDir.parent.parent) {
+                var projectRootDir = scriptDir.parent.parent;  // 项目根
+                if (projectRootDir.exists && Folder(projectRootDir.fsName + "/workspace").exists) {
+                    return projectRootDir.fsName;
+                }
+            }
+        } catch (e) {
+        }
+        return "";
+    }
+
     function collectConfigCandidates(baseFolder, activeDoc) {
         var candidates = [];
         var seen = {};
         var roots = [];
         var i;
 
-        // 最高优先级：从配置文件读取项目根路径
-        try {
-            var homeDir = Folder("~");
-            var configPaths = [
-                homeDir.fsName + "/autorainbow_config.json",
-                homeDir.fsName + "/.autorainbow/config.json"
+        // 最高优先级：统一路径索引 + 项目内业务配置
+        // （不再读家目录 ~/autorainbow_config.json / ~/.autorainbow/config.json）
+        var projectRoot = resolveDispatchProjectRoot();
+        if (projectRoot) {
+            var cfgPaths = [
+                projectRoot + "/workspace/.runtime/autorainbow_config.json",
+                projectRoot + "/workspace/templates/config.json"
             ];
-            for (var cp = 0; cp < configPaths.length; cp++) {
-                var configFile = File(configPaths[cp]);
-                if (configFile.exists) {
-                    if (configFile.open("r")) {
-                        configFile.encoding = "UTF-8";
-                        var text = configFile.read();
-                        configFile.close();
-                        if (text.charCodeAt(0) === 0xFEFF) {
-                            text = text.slice(1);
-                        }
-                        var cfg = parseJsonText(text, "autorainbow_config.json");
-                        if (cfg && cfg.project_root) {
-                            var configPath = cfg.project_root + "/workspace/A_templates/config.json";
-                            if (!seen[configPath]) {
-                                seen[configPath] = true;
-                                candidates.push(File(configPath));
-                            }
-                        }
-                    }
+            for (var k = 0; k < cfgPaths.length; k += 1) {
+                if (!seen[cfgPaths[k]]) {
+                    seen[cfgPaths[k]] = true;
+                    candidates.push(File(cfgPaths[k]));
                 }
-            }
-        } catch (e) {
-        }
-
-        // 其次：从 watcher 传递的全局变量获取
-        if (typeof $.global.__AUTO_RAINBOW_PROJECT_ROOT__ === "string" && $.global.__AUTO_RAINBOW_PROJECT_ROOT__) {
-            var globalPath = $.global.__AUTO_RAINBOW_PROJECT_ROOT__ + "/workspace/A_templates/config.json";
-            if (!seen[globalPath]) {
-                seen[globalPath] = true;
-                candidates.push(File(globalPath));
             }
         }
 
@@ -313,11 +506,11 @@
             var guard = 0;
             while (current && guard < 10) {
                 var paths = [
-                    current.fsName + "/workspace/A_templates/config.json",
+                    current.fsName + "/workspace/templates/config.json",
                     current.fsName + "/workspace/config.json",
-                    current.fsName + "/D/A_templates/config.json",
+                    current.fsName + "/D/templates/config.json",
                     current.fsName + "/D/config.json",
-                    current.fsName + "/A_templates/config.json",
+                    current.fsName + "/templates/config.json",
                     current.fsName + "/config.json"
                 ];
                 var j;
@@ -357,7 +550,7 @@
 
     function getProjectRootFromConfig(configFile) {
         var parentFolder = configFile.parent;
-        if (parentFolder && parentFolder.name === "A_templates") {
+        if (parentFolder && parentFolder.name === "templates") {
             return parentFolder.parent;
         }
         return parentFolder;
@@ -414,17 +607,17 @@
         var baseName = sanitizeFileNamePart(docName.replace(/\.[^.]+$/, ""));
         var sectionPart = sanitizeFileNamePart(sectionName || "output");
 
-        var outputRoot = null;
+        // 2026-08-16 新结构：成品平铺到 outputs/done/{板块}_{名}.indd（无板块层级、无时间戳）
+        var doneRoot = null;
         if ($.global.__AUTO_RAINBOW_PROJECT_ROOT__) {
-            outputRoot = Folder($.global.__AUTO_RAINBOW_PROJECT_ROOT__ + "/workspace/B_outputs");
+            doneRoot = Folder($.global.__AUTO_RAINBOW_PROJECT_ROOT__ + "/workspace/outputs/done");
         }
-        if (!outputRoot || !outputRoot.exists) {
-            outputRoot = Folder(outputJsonFile.fsName.split("/_cache/")[0]);
+        if (!doneRoot || !doneRoot.exists) {
+            doneRoot = Folder(outputJsonFile.fsName.split("/work/caches/")[0] + "/outputs/done");
         }
-        var sectionDir = Folder(outputRoot.fsName + "/" + sectionPart);
-        if (!sectionDir.exists) { sectionDir.create(); }
+        if (!doneRoot.exists) { doneRoot.create(); }
 
-        var outputFile = File(sectionDir.fsName + "/" + baseName + ".indd");
+        var outputFile = File(doneRoot.fsName + "/" + sectionPart + "_" + baseName + ".indd");
         return outputFile;
     }
 
@@ -630,6 +823,10 @@
                 updated += 1;
             } catch (e1) {
                 failed += 1;
+                try {
+                    pushLog(logs, "链接更新失败: file=" + (oneLink.filePath || oneLink.name || "?") + " 错误=" + e1);
+                } catch (eLog) {
+                }
             }
         }
 
@@ -668,41 +865,20 @@
     function writeProgress(progressData) {
         try {
             var queueRoot = "";
-            // 优先使用 watcher 设置的全局变量
+            // 优先使用 watcher 设置的全局变量（副本自带项目根）
             if (typeof $.global.__AUTO_RAINBOW_PROJECT_ROOT__ === "string" && $.global.__AUTO_RAINBOW_PROJECT_ROOT__) {
-                var candidate = $.global.__AUTO_RAINBOW_PROJECT_ROOT__ + "/workspace/B_outputs/queue";
+                var candidate = $.global.__AUTO_RAINBOW_PROJECT_ROOT__ + "/workspace/.runtime/queue";
                 if (Folder(candidate).exists) {
                     queueRoot = candidate;
                 }
             }
-            // 回退：从配置文件读取
+            // 回退：统一路径索引（workspace/.runtime/paths.json）
             if (!queueRoot) {
-                var homeDir = Folder("~");
-                var configPaths = [
-                    homeDir.fsName + "/autorainbow_config.json",
-                    homeDir.fsName + "/.autorainbow/config.json"
-                ];
-                for (var cp = 0; cp < configPaths.length; cp++) {
-                    var configFile = File(configPaths[cp]);
-                    if (configFile.exists) {
-                        try {
-                            if (configFile.open("r")) {
-                                configFile.encoding = "UTF-8";
-                                var text = configFile.read();
-                                configFile.close();
-                                if (text.charCodeAt(0) === 0xFEFF) {
-                                    text = text.slice(1);
-                                }
-                                var cfg = parseJsonText(text, "autorainbow_config.json");
-                                if (cfg && cfg.project_root) {
-                                    var fallback = cfg.project_root + "/workspace/B_outputs/queue";
-                                    if (Folder(fallback).exists) {
-                                        queueRoot = fallback;
-                                    }
-                                }
-                            }
-                        } catch (e1) {
-                        }
+                var projRoot = resolveDispatchProjectRoot();
+                if (projRoot) {
+                    var fallback = projRoot + "/workspace/.runtime/queue";
+                    if (Folder(fallback).exists) {
+                        queueRoot = fallback;
                     }
                 }
             }
@@ -713,7 +889,7 @@
                     var scriptDir = scriptFile.parent;
                     if (scriptDir && scriptDir.parent && scriptDir.parent.parent) {
                         var projectRoot = scriptDir.parent.parent.fsName;
-                        var fallback2 = projectRoot + "/workspace/B_outputs/queue";
+                        var fallback2 = projectRoot + "/workspace/.runtime/queue";
                         if (Folder(fallback2).exists) {
                             queueRoot = fallback2;
                         }
@@ -770,7 +946,7 @@
         if (!src.exists) {
             return "";
         }
-        var dir = Folder(projectRoot + "/workspace/B_outputs/queue/" + dirName);
+        var dir = Folder(projectRoot + "/workspace/.runtime/queue/" + dirName);
         if (!ensureFolderExists(dir)) {
             return "";
         }
@@ -787,7 +963,7 @@
 
     function removeQueueProgress(projectRoot) {
         try {
-            var progressFile = File(projectRoot + "/workspace/B_outputs/queue/progress.json");
+            var progressFile = File(projectRoot + "/workspace/.runtime/queue/progress.json");
             if (progressFile.exists) {
                 progressFile.remove();
             }
@@ -804,33 +980,61 @@
         var runningTaskDirect = false;
 
         try {
+            // 2026-08-18：不再读家目录配置。项目根由
+            // resolveDispatchProjectRoot() 解析（全局注入 / 脚本位置反推），
+            // 目录路径从统一路径索引 workspace/.runtime/paths.json 读取，
+            // 业务配置从 workspace/.runtime/autorainbow_config.json 读取。
             var scriptFile = File($.fileName);
             var scriptFolder = scriptFile.parent;
-            var homeDir = Folder("~");
-            var mergedCfgFile = File(homeDir.fsName + "/autorainbow_config.json");
-            if (!mergedCfgFile.exists) {
-                mergedCfgFile = File(homeDir.fsName + "/.autorainbow/config.json");
-            }
-            if (!mergedCfgFile.exists) {
-                throw new Error("未找到配置文件: ~/autorainbow_config.json");
-            }
-            var mergedCfg = readJsonFile(mergedCfgFile);
-            var projectRoot = mergedCfg.project_root || "";
-            if (!projectRoot || !Folder(projectRoot).exists) {
-                throw new Error("配置中 project_root 无效: " + projectRoot);
+            var projectRoot = resolveDispatchProjectRoot();
+            if (!projectRoot) {
+                throw new Error("未找到项目根目录（无 watcher 全局、无注入常量、脚本位置反推失败）");
             }
             $.global.__AUTO_RAINBOW_PROJECT_ROOT__ = projectRoot;
 
-            var diagFile = File(projectRoot + "/workspace/B_outputs/logs/dispatch_debug.log");
+            var mergedCfg = {};
+            var pathsCfg = {};
+            var pathsFile = File(projectRoot + "/workspace/.runtime/paths.json");
+            if (pathsFile.exists) {
+                try {
+                    pathsCfg = readJsonFile(pathsFile);
+                } catch (ePaths) {
+                    pathsCfg = {};
+                }
+            }
+            var mergedCfgFile = File(projectRoot + "/workspace/.runtime/autorainbow_config.json");
+            if (mergedCfgFile.exists) {
+                try {
+                    mergedCfg = readJsonFile(mergedCfgFile);
+                } catch (eCfg) {
+                    mergedCfg = {};
+                }
+            }
+            // 统一路径索引的 dirs 平铺进配置，供各模板脚本使用
+            (function mergeDirs(src) {
+                for (var dk in src) {
+                    if (src.hasOwnProperty(dk)) {
+                        mergedCfg[dk] = src[dk];
+                    }
+                }
+            })(pathsCfg.dirs || {});
+            if (pathsCfg.project_root) {
+                mergedCfg.project_root = pathsCfg.project_root;
+            }
+            if (!mergedCfg.project_root) {
+                mergedCfg.project_root = projectRoot;
+            }
+
+            var diagFile = File(projectRoot + "/workspace/.runtime/logs/dispatch_debug.log");
             writeTextFile(diagFile, "[" + nowText() + "] dispatch started, projectRoot=" + projectRoot + "\n");
 
-            var templatesRootPath = mergedCfg.templates_root_dir || "A_templates";
+            var templatesRootPath = mergedCfg.templates_dir || mergedCfg.templates_root_dir || "workspace/templates";
             var templatesRoot = Folder(resolveFile(Folder(projectRoot), templatesRootPath).fsName);
             if (!templatesRoot.exists) {
                 throw new Error("模板根目录不存在: " + templatesRoot.fsName);
             }
 
-            var workspacePath = mergedCfg.doc_workspace_dir || "B_outputs";
+            var workspacePath = mergedCfg.outputs_dir || mergedCfg.doc_workspace_dir || "workspace/outputs";
             var workspaceFolder = Folder(resolveFile(Folder(projectRoot), workspacePath).fsName);
             if (!workspaceFolder.exists) {
                 throw new Error("文档输出目录不存在: " + workspaceFolder.fsName);
@@ -1002,9 +1206,12 @@
                         if (!doc || !doc.isValid) {
                             throw new Error("模板打开后文档无效: " + templateInddFile.fsName);
                         }
+                        pushLog(logs, "模板已打开: " + templateInddFile.fsName + " 页数=" + doc.pages.length);
 
                         updateOutdatedLinksQuietly(doc, logs, "打开模板后");
+                        pushLog(logs, "开始执行排版脚本: " + layoutScriptFile.fsName);
                         $.evalFile(layoutScriptFile);
+                        pushLog(logs, "排版脚本执行完成: " + layoutScriptFile.fsName);
                     });
 
                 if (!outputInddFile.exists) {
@@ -1069,7 +1276,8 @@
                 results: progressResults
             });
 
-            var dispatchLogPath = mergedCfg.dispatch_log_file || (mergedCfg.doc_workspace_dir || "B_outputs") + "/logs/dispatch.log";
+            // 2026-08-16：logs_dir 配置已是 workspace/.runtime/logs（勿再拼 /logs/）
+            var dispatchLogPath = mergedCfg.dispatch_log_file || (mergedCfg.logs_dir || "workspace/.runtime/logs") + "/dispatch.log";
             var dispatchLogFile = resolveFile(Folder(projectRoot), dispatchLogPath);
             pushLog(logs, "成功:" + okCount + " 失败:" + failCount);
             appendLogText(dispatchLogFile, logs.join("\n"));
@@ -1094,7 +1302,7 @@
                             }
                         }
                     }
-                    appendLogText(dispatchLogFile, logs.join("\n"));
+                    // 2026-08-07：打开输出后的附加日志不再重复写 dispatch.log（logs 已在 1261 行写过）
                 }
             }
 
@@ -1108,7 +1316,7 @@
             // 批处理完成后只清理 done 任务；_cache JSON 是编辑核心文件，必须保留。
             if (isBatchMode) {
                 try {
-                    var doneDir = Folder(projectRoot + "/workspace/B_outputs/queue/done");
+                    var doneDir = Folder(projectRoot + "/workspace/.runtime/queue/done");
                     if (doneDir && doneDir.exists) {
                         var doneFiles = doneDir.getFiles("*.json");
                         for (var df = 0; df < doneFiles.length; df++) {
@@ -1134,14 +1342,11 @@
     } catch (err) {
         var isBatch = !!(typeof $.global !== "undefined" && $.global.__AUTO_RAINBOW_WATCHER_INSTALLED__);
         try {
-            var _homeDir = Folder("~");
-            var _cfgFile = File(_homeDir.fsName + "/autorainbow_config.json");
-            if (_cfgFile.exists) {
-                var _cfg = readJsonFile(_cfgFile);
-                var _projRoot = _cfg.project_root || "";
-                if (_projRoot) {
-                    var _diagFile = File(_projRoot + "/workspace/B_outputs/logs/dispatch_debug.log");
-                    appendLogText(_diagFile, "[" + nowText() + "] FATAL ERROR: " + String(err).slice(0, 500) + "\n");
+            // 2026-08-18：fatal 处理同样不再读家目录配置，走统一项目根解析
+            var _projRoot = resolveDispatchProjectRoot();
+            if (_projRoot) {
+                var _diagFile = File(_projRoot + "/workspace/.runtime/logs/dispatch_debug.log");
+                appendLogText(_diagFile, "[" + nowText() + "] FATAL ERROR: " + String(err).slice(0, 500) + "\n");
                     var _directTaskFile = "";
                     try {
                         _directTaskFile = $.global.__AUTO_RAINBOW_DIRECT_TASK_FILE__ || "";
@@ -1180,7 +1385,6 @@
                         isBatch = true;
                     }
                 }
-            }
         } catch (_e) {}
         if (!isBatch) {
             alert("分发脚本执行失败: " + err);

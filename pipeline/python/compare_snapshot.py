@@ -54,23 +54,17 @@ def discover_snapshot_dirs(workspace_root):
 
 
 def compute_golden_dir(actual_dir, golden_root):
-    """根据 actual 在 workspace 下的相对路径，计算 golden_root 下的对应路径"""
+    """根据快照目录计算金标目录。
+
+    2026-08-16 新结构：快照/金标位于 outputs/work/snapshots/{板块}_{名}/，
+    _golden 与 _snapshots 同级。金标目录 = 快照目录的父目录 + "/_golden"，
+    不依赖 workspace 层级探测（旧 B_outputs 结构同样适用，_golden 也在同级）。
+    """
     if not golden_root:
         return None
-    workspace_b_outputs = None
-    # 向上找 workspace/B_outputs
-    for parent in actual_dir.parents:
-        if parent.name == "B_outputs" and parent.parent.name == "workspace":
-            workspace_b_outputs = parent
-            break
-    if not workspace_b_outputs:
-        return None
-    try:
-        rel = actual_dir.relative_to(workspace_b_outputs)
-    except ValueError:
-        return None
-    golden = resolve_dir(golden_root) / rel
-    return golden
+    if actual_dir.name == "_snapshots":
+        return actual_dir.parent / "_golden"
+    return None
 
 
 def load_json(filepath):

@@ -53,22 +53,30 @@ class TestDiffJson:
 
 
 class TestComputeGoldenDir:
-    def test_basic(self):
-        actual = Path("/x/workspace/B_outputs/1_头条/doc/_snapshots")
-        expected = Path("/golden/1_头条/doc/_snapshots")
+    def test_new_structure_same_level_golden(self):
+        # 新结构（2026-08-16）：_golden 与 _snapshots 同级
+        actual = Path("/x/workspace/outputs/work/snapshots/7_周边_周边7.31/_snapshots")
+        expected = Path("/x/workspace/outputs/work/snapshots/7_周边_周边7.31/_golden")
         result = compute_golden_dir(actual, "/golden")
         assert result == expected
 
     def test_no_workspace(self):
+        # 新结构：不依赖 workspace 探测，_snapshots 同级必有 _golden
         actual = Path("/some/other/path/_snapshots")
         result = compute_golden_dir(actual, "/golden")
-        assert result is None
+        assert result == Path("/some/other/path/_golden")
 
-    def test_nested_path(self):
+    def test_legacy_b_outputs_mapping(self):
+        # 统一行为：_golden 始终在 _snapshots 同级（旧 B_outputs 结构同样适用）
         actual = Path("/x/workspace/B_outputs/a/b/c/doc/_snapshots")
         golden_root = "/golden"
         result = compute_golden_dir(actual, golden_root)
-        assert result == Path("/golden/a/b/c/doc/_snapshots")
+        assert result == Path("/x/workspace/B_outputs/a/b/c/doc/_golden")
+
+    def test_non_snapshot_dir_returns_none(self):
+        actual = Path("/x/workspace/outputs/work/snapshots/foo")
+        result = compute_golden_dir(actual, "/golden")
+        assert result is None
 
 
 class TestFormatReport:
